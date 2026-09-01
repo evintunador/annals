@@ -15,6 +15,10 @@ import type { RepoInfo } from "./git.js";
 export interface NamespaceConfig {
   /** Namespace name. Records live at `refs/notes/<name>`. */
   name: string;
+  /** Name of the staging ref fetches land in, under refs/notes/. Defaults
+   * to `<name>-incoming`; overridable so a namespace that predates annals
+   * can keep the refspec already installed in existing repos. */
+  incomingName: string;
   /** Directory under the repo's common git dir for local state (pending
    * events, allowlist, known-secrets). Defaults to `name`. */
   stateDirName: string;
@@ -45,6 +49,7 @@ export function resolveNamespace(opts: Partial<NamespaceConfig> = {}): Namespace
   const name = opts.name ?? DEFAULT_NAMESPACE;
   return {
     name,
+    incomingName: opts.incomingName ?? `${name}-incoming`,
     stateDirName: opts.stateDirName ?? name,
     configFile: opts.configFile ?? `.${name}.json`,
     userConfigDir: opts.userConfigDir ?? name,
@@ -76,5 +81,5 @@ export function notesRef(ns: NamespaceConfig): string {
 
 /** Staging ref where the fetch refspec lands the remote's records. */
 export function incomingRef(ns: NamespaceConfig): string {
-  return `refs/notes/${ns.name}-incoming`;
+  return `refs/notes/${ns.incomingName}`;
 }
