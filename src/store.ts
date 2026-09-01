@@ -746,7 +746,7 @@ async function remoteNoteIds(repo: Ledger, remote: string): Promise<Set<string> 
   })).trim();
   if (!remoteHasRef) return null;
 
-  const tmpName = "conversation-ledger-scan-tmp";
+  const tmpName = `${repo.ns.name}-scan-tmp`;
   const tmpRef = `refs/notes/${tmpName}`;
   await git(["fetch", remote, `+${notesRef(repo.ns)}:${tmpRef}`], { cwd: repo.root, allowFailure: true });
   try {
@@ -762,8 +762,8 @@ async function remoteNoteIds(repo: Ledger, remote: string): Promise<Set<string> 
 
 /** Thrown when the layer-E scan gate blocks a push; carries no secrets. */
 export class ScanBlockedError extends Error {
-  constructor(public readonly findings: number) {
-    super(`sync: push blocked — ${findings} potential secret(s) found (see report above)`);
+  constructor(public readonly findings: number, cliName = "annals") {
+    super(`${cliName} sync: push blocked — ${findings} potential secret(s) found (see report above)`);
   }
 }
 
@@ -863,7 +863,7 @@ async function runScanGate(
       `  ${repo.ns.cliName} allow <fingerprint>   mark a fingerprint as a known false positive\n` +
       `  ${repo.ns.cliName} sync --no-scan        skip this gate for this sync only\n`,
   );
-  throw new ScanBlockedError(findings.length);
+  throw new ScanBlockedError(findings.length, repo.ns.cliName);
 }
 
 /**

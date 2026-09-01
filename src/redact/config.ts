@@ -83,7 +83,7 @@ const NON_SECRET_ENV_NAME = /^(?:PATH|HOME|PWD|OLDPWD|SHELL|TERM.*|USER|LOGNAME|
  * *silently* means the user believes protections are active when they are
  * not. Warn and continue.
  */
-async function readJsonConfig(path: string): Promise<AnnalsConfig | null> {
+async function readJsonConfig(cliName: string, path: string): Promise<AnnalsConfig | null> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
@@ -96,14 +96,14 @@ async function readJsonConfig(path: string): Promise<AnnalsConfig | null> {
       return parsed as AnnalsConfig;
     }
     process.stderr.write(
-      `cledger: ignoring ${path} — expected a JSON object, got ` +
+      `${cliName}: ignoring ${path} — expected a JSON object, got ` +
         `${Array.isArray(parsed) ? "an array" : typeof parsed}. All settings in it are ` +
         `inactive; defaults are in effect.\n`,
     );
     return null;
   } catch (err) {
     process.stderr.write(
-      `cledger: ignoring ${path} — invalid JSON (${err instanceof Error ? err.message : String(err)}). ` +
+      `${cliName}: ignoring ${path} — invalid JSON (${err instanceof Error ? err.message : String(err)}). ` +
         `All settings in it are inactive; defaults are in effect.\n`,
     );
     return null;
@@ -147,8 +147,8 @@ export async function loadConfig(repo: Ledger): Promise<AnnalsConfig> {
   const userPath = join(homedir(), ".config", repo.ns.userConfigDir, "config.json");
   const repoPath = join(repo.root, repo.ns.configFile);
   const [userConfig, repoConfig] = await Promise.all([
-    readJsonConfig(userPath),
-    readJsonConfig(repoPath),
+    readJsonConfig(repo.ns.cliName, userPath),
+    readJsonConfig(repo.ns.cliName, repoPath),
   ]);
   const base = userConfig ?? {};
   const override = repoConfig ?? {};

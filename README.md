@@ -58,7 +58,14 @@ name, and the CLI the pre-push hook invokes. Producers that want their own
 independently-pushable, independently-wipeable ref (a derived layer that must
 be rebuildable, say) open their own namespace; producers extending an
 existing vocabulary write into that vocabulary's namespace through its
-owner's API. cledger uses `{ name: "cledger", configFile: ".cledger.json" }`.
+owner's API. cledger uses `{ name: "conversation-ledger", configFile: ".cledger.json" }`.
+
+Two namespaces in one repo chain two hook blocks in `pre-push`. Git feeds
+that script its stdin once, so only the first block sees the pushed-ref
+list; later blocks degrade to `HEAD` scope — records still push, scoped to
+the checked-out branch. And a custom namespace's hook only fires if its
+`cliName` is on PATH or `hookInvocation` was given; otherwise its owner
+syncs through the library.
 
 ## Size policy
 

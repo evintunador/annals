@@ -226,7 +226,7 @@ export function renderFinding(event: EvidenceEvent, f: Finding, opts: RenderOpti
     `rule:        ${f.rule}`,
     `fingerprint: ${f.fingerprint}`,
     `event:       ${f.eventId}`,
-    `stream:${f.stream ?? " -"}`,
+    `stream:      ${f.stream ?? "-"}`,
     `occurred_at: ${f.occurred_at}`,
     `location:    ${f.path}, chars ${f.start}-${f.end} of ${value.length}`,
     `match:       ${f.end - f.start} chars, ${opts.reveal ? "SHOWN BELOW" : "masked (pass --reveal to show)"}`,

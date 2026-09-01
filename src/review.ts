@@ -157,7 +157,7 @@ export function renderView(screen: Screen, view: ViewState): void {
   const head = [
     `${BOLD}span ${view.groupIndex + 1} of ${view.groupCount}${RESET}  [${group.fingerprint}]  ${group.rule}`,
     `${DIM}site ${view.siteIndex + 1} of ${group.findings.length} · event ${f.eventId.slice(0, 16)} · ${f.path} @${f.start}${RESET}`,
-    `${DIM}${f.occurred_at} · ${f.stream ?? "(no conversation)"}${RESET}`,
+    `${DIM}${f.occurred_at} · ${f.stream ?? "(no stream)"}${RESET}`,
   ];
 
   const menuPairs: [string, string][] =
@@ -341,13 +341,13 @@ export async function runReview(repo: Ledger, opts: ReviewOptions): Promise<Revi
           const value = event ? collectStrings(event).get(f.path) : undefined;
           const span = value?.slice(f.start, f.end);
           if (!span) {
-            message = "cannot recover the span text (event rewritten?) — use cledger redact by hand";
+            message = `cannot recover the span text (event rewritten?) — use ${repo.ns.cliName} redact by hand`;
           } else {
             const pattern = escapeLiteral(span);
             let ok = 0;
             for (const eventId of group.eventIds) {
               try {
-                await redactEvent(repo, eventId, { pattern, reason: "cledger review" });
+                await redactEvent(repo, eventId, { pattern, reason: `${repo.ns.cliName} review` });
                 ok += 1;
               } catch (err) {
                 const why =
