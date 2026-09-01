@@ -1,0 +1,49 @@
+{
+  "name": "annals",
+  "version": "0.1.0",
+  "description": "Append-only records anchored to git commits: typed, linkable, redacted-on-write, synced through git notes.",
+  "type": "module",
+  "license": "MIT",
+  "author": "evintunador",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/evintunador/annals"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "keywords": [
+    "git-notes",
+    "append-only",
+    "provenance",
+    "event-store",
+    "records"
+  ],
+  "files": [
+    "dist",
+    "!dist/test",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
+    "prepublishOnly": "npm test",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  },
+  "bin": {
+    "annals": "dist/cli.js"
+  }
+}
