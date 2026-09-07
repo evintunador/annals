@@ -55,7 +55,7 @@ test("reAnchorDraft is deterministic across machines: order-independent, system 
   // Same mapping discovered in a different order on another machine must
   // produce the same id, or cat_sort_uniq syncs would accumulate duplicates.
   assert.equal(one.id, two.id);
-  assert.equal(one.actor.type, "system");
+  assert.equal((one.meta as { actor: { type: string } }).actor.type, "system");
   assert.deepEqual((one.content as { superseded: string[] }).superseded, [SHA_A, SHA_B]);
 });
 

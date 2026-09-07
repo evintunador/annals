@@ -11,53 +11,16 @@ export const SCHEMA_VERSION = "annals/v1";
  * `redaction` (a record was rewritten to remove a secret) and `re_anchor`
  * (anchor commits were rewritten away by a squash/rebase).
  */
-export interface Actor {
-  /** "human" | "agent" | "system" */
-  type: string;
-  /** Stable identity when known, e.g. git author email or model id. */
-  id?: string;
-  display?: string;
-}
-
 export interface Producer {
-  /** Tool that wrote this event, e.g. "cledger", "turnbridge". */
+  /** Tool that wrote this event, e.g. "cledger", "turnbridge". Pairs with
+   * `kind` to identify a vocabulary: a third-party kind is addressed as
+   * (producer.tool, kind), never by kind alone. Not part of event identity —
+   * two tools recording byte-identical facts dedup to one event. */
   tool: string;
-  /** Capture tool version. Not part of event identity. */
+  /** Vocabulary revision the event was written against. Not part of event
+   * identity. */
   version?: string;
-  /** Source system the content came from, e.g. "claude-code", "codex". */
-  source?: string;
-  /**
-   * The source system's own version — the coding CLI's version, not
-   * the writing tool's (that is `version`), e.g. "2.1.220" for claude-code or
-   * "0.145.0" for codex. Not part of event identity.
-   */
-  source_version?: string;
-  /**
-   * Model that served this turn, verbatim as the source names it, e.g.
-   * "claude-opus-5" or "gpt-5.6-sol". Set only when the source states it
-   * for this turn — never guessed, never carried across turns the source
-   * did not label. Not part of event identity.
-   */
-  model?: string;
-  /**
-   * Inference provider serving `model`, verbatim as the source names it,
-   * e.g. "openai". Set only when the source states it — notably *not*
-   * inferred from `source` or from the model id, since the same CLI can be
-   * pointed at a first-party API, a cloud reseller, or a local endpoint.
-   * Not part of event identity.
-   */
-  provider?: string;
-  /** Source system's native session identifier. */
-  session_id?: string;
 }
-
-/**
- * The source-stated agent facts an adapter attaches to `producer`. Adapters
- * gather these from wherever the source records them — a per-line field, a
- * preceding session/turn-context line — and spread them onto every event
- * they emit for that part of the transcript.
- */
-export type ProducerAgentContext = Pick<Producer, "source_version" | "model" | "provider">;
 
 export interface RepoContext {
   /** Best-known repository identity (origin URL or top-level dir name). */
@@ -105,8 +68,17 @@ export interface EvidenceEvent {
   occurred_at: string;
   /** When this event was appended. Not part of identity. */
   recorded_at: string;
-  actor: Actor;
   producer: Producer;
+  /**
+   * Producer-owned metadata the store never interprets: who spoke, which
+   * model served the turn, which source system and session produced the
+   * line — whatever the vocabulary wants to attach without teaching the
+   * envelope its concepts. Two store-level contracts, and they are the
+   * whole design: `meta` is EXCLUDED from event identity (provenance can
+   * be added or enriched later without the same fact getting a new id),
+   * and it IS walked by redaction and the secret scan (unlike `resolved`).
+   */
+  meta?: Record<string, unknown>;
   /** IANA media type of `content`; defaults to application/json. */
   media_type?: string;
   /** The visible content itself, stored inline and never reinterpreted. */
@@ -163,26 +135,18 @@ export type EventDraft = Omit<EvidenceEvent, "id" | "schema" | "recorded_at"> &
  * Event identity is derived from the durable, source-determined subset so
  * that re-scanning the same source material always yields the same id
  * (idempotent capture). Volatile provenance — recorded_at, context, raw,
- * producer.version/tool — is deliberately excluded: a re-ingestion under a
- * different HEAD or adapter version must dedup, not duplicate.
- *
- * `producer.model`/`provider`/`source_version` are excluded for the same
- * reason even though they *are* source-determined and stable per line. They
- * were added after events had already been captured without them, so folding
- * them into identity would give the very same transcript line a different id
- * before and after the upgrade — a rescan would duplicate every pre-upgrade
- * turn rather than dedup it. Identity answers "which piece of source material
- * is this"; the model that served it is provenance about that material, not
- * a second copy of it.
+ * resolved, producer, and all of `meta` — is deliberately excluded: a
+ * re-ingestion under a different HEAD, tool version, or later-enriched
+ * metadata must dedup, not duplicate. Identity answers "which piece of
+ * source material is this"; who recorded it and what served it are
+ * provenance about that material, not a second copy of it. A vocabulary
+ * that needs more of its facts in identity puts them in `content`.
  */
 export function eventId(event: EventDraft): string {
   const identity = {
     schema: SCHEMA_VERSION,
     kind: event.kind,
     occurred_at: event.occurred_at,
-    actor: { type: event.actor.type, id: event.actor.id },
-    source: event.producer.source,
-    session_id: event.producer.session_id,
     stream: event.stream,
     media_type: event.media_type,
     content: event.content,
@@ -212,7 +176,6 @@ export function validateEvent(event: EvidenceEvent): string[] {
   if (!event.kind) problems.push("kind is required");
   if (!isIsoDate(event.occurred_at)) problems.push("occurred_at must be ISO 8601");
   if (!isIsoDate(event.recorded_at)) problems.push("recorded_at must be ISO 8601");
-  if (!event.actor?.type) problems.push("actor.type is required");
   if (!event.producer?.tool) problems.push("producer.tool is required");
   if (event.content === undefined) problems.push("content is required");
   return problems;

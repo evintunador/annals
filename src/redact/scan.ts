@@ -196,6 +196,7 @@ export function collectStrings(event: EvidenceEvent): Map<string, string> {
   };
   walkStrings(event.content, "content", visit);
   if (event.raw) walkStrings(event.raw.data, "raw/data", visit);
+  if (event.meta) walkStrings(event.meta, "meta", visit);
   return out;
 }
 

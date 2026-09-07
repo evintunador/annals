@@ -32,8 +32,8 @@ payloads in their own packages.
   schema: "annals/v1",
   kind: string,                    // open; owned by (producer.tool, kind)
   occurred_at, recorded_at: string // ISO 8601; recorded_at not in identity
-  actor: { type, id?, display? },  // who: "human" | "agent" | "system"
-  producer: { tool, version?, source?, source_version?, model?, provider?, session_id? },
+  producer: { tool, version? },    // who wrote it; (tool, kind) names a vocabulary
+  meta?: { ... },                  // producer-owned metadata, uninterpreted
   stream?: { id, seq, parent? },   // grouping + ordering, e.g. a conversation
   links?: [{ rel, target }],       // typed edges to other records
   content: unknown,                // never interpreted by annals
@@ -41,13 +41,24 @@ payloads in their own packages.
 }
 ```
 
-Identity (what makes two writes the same record) is the source-determined
-subset: schema, kind, occurred_at, actor type+id, producer source+session_id,
-stream, media_type, content, links. Volatile provenance — recorded_at,
-context, raw, resolved, producer tool/version/model — is excluded so a rescan
-under a different HEAD or tool version dedups instead of duplicating. Note
-the consequence: two records differing *only* by `producer.tool` dedup to
-one. Byte-identical content is the same fact.
+The envelope carries no downstream concepts: no actor, no model, no session.
+A vocabulary that wants them (cledger records who spoke and which model
+served a turn) puts them in `meta`. Each field answers exactly two
+store-level questions — is it in the id, and does redaction walk it:
+
+| field | in identity | redaction-walked |
+|---|---|---|
+| kind, occurred_at, stream, media_type, content, links | yes | content yes |
+| meta | **no** | **yes** |
+| raw | no | yes (`raw.data`) |
+| producer, context, recorded_at, redactions | no | no |
+| resolved | no | **no** — never put payloads here |
+
+`meta` being identity-excluded is the point: provenance can be added or
+enriched later without the same fact getting a new id. A vocabulary that
+needs one of its facts *in* identity puts it in `content`. Note the standing
+consequence: two records differing only by producer or meta dedup to one —
+byte-identical content is the same fact.
 
 ## Namespaces
 
@@ -73,7 +84,22 @@ Records carry pointers, digests, and spans — never large artifacts. Git notes
 replicate to every clone that fetches the ref; a checkpoint, a media file, or
 a whole database belongs elsewhere, referenced by path + hash (see
 `resolved`). The redaction stack walks `content` and `raw.data` only, which
-is the second reason not to smuggle payloads into other fields.
+is the second reason not to smuggle payloads into other fields. Enforced
+softly: an event serializing over `limits.warnEventBytes` (default 5MB)
+warns on stderr but still appends — capture must never drop records on size
+alone; set `limits.maxEventBytes` to opt into hard refusal for a producer
+that would rather fail loudly, such as a derived layer.
+
+## Identity records (optional pattern)
+
+The envelope has no actor field, and attribution does not need one: an
+identity can be a record like any other — its own kind, its own producer —
+and a record claims authorship with a link (`{ rel: "authored_by", target:
+<identity record id> }`). That is how git-bug stores identities, versioned
+and signable, in the same store as its bugs. Nothing in annals mandates
+this; a vocabulary can just as well denormalize `meta.actor` onto every
+record (cledger does today) and adopt identity records later without a
+schema change — both are producer-space conventions.
 
 ## Prior art
 

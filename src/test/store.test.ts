@@ -202,7 +202,8 @@ test("readEvents: filters by kind, source, and conversation prefix", async () =>
       draft({ kind: "decision", content: { text: "d" } }),
       draft({
         kind: "conversation_turn",
-        producer: { tool: "cledger", source: "claude-code", session_id: "s1" },
+        producer: { tool: "cledger" },
+        meta: { source: "claude-code", session_id: "s1" },
         stream: { id: "claude-code:s1", seq: 0 },
         content: { text: "turn" },
       }),
@@ -211,8 +212,8 @@ test("readEvents: filters by kind, source, and conversation prefix", async () =>
     const decisions = await readEvents(repo, { kind: "decision" });
     assert.strictEqual(decisions.length, 1);
 
-    const claudeCode = await readEvents(repo, { source: "claude-code" });
-    assert.strictEqual(claudeCode.length, 1);
+    const cledgerTool = await readEvents(repo, { tool: "cledger" });
+    assert.strictEqual(cledgerTool.length, 2);
 
     const byConvPrefix = await readEvents(repo, { stream: "claude-code:s1" });
     assert.strictEqual(byConvPrefix.length, 1);
@@ -232,6 +233,25 @@ test("git revList sanity: reachability set includes ancestors only", async () =>
     const c1 = await makeCommit(repo, "one");
     const reachable = await revList(repo, "HEAD");
     assert.ok(reachable.has(c1));
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("size policy: oversize events warn by default and refuse only when maxEventBytes is set", async () => {
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "init");
+    const big = "x".repeat(700);
+    await writeFile(join(repo.root, ".annals.json"), JSON.stringify({ limits: { warnEventBytes: 500 } }));
+    const warned = await appendEvents(repo, [draft({ content: { text: big } })]);
+    assert.strictEqual(warned.appended.length, 1, "warn threshold never blocks the append");
+
+    await writeFile(join(repo.root, ".annals.json"), JSON.stringify({ limits: { maxEventBytes: 500 } }));
+    await assert.rejects(
+      () => appendEvents(repo, [draft({ content: { text: big + "y" } })]),
+      /over limits\.maxEventBytes/,
+    );
   } finally {
     await cleanupRepo(repo);
   }

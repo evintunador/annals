@@ -194,8 +194,9 @@ test("manual re-anchor: human actor, dedup on repeat, GC'd full SHAs accepted", 
 
     const first = await manualReAnchor(repo, [a], "main");
     assert.ok(first.event);
-    assert.equal(first.event.actor.type, "human");
-    assert.equal(first.event.actor.id, "test@example.com");
+    const actor = (first.event.meta as { actor: { type: string; id?: string } }).actor;
+    assert.equal(actor.type, "human");
+    assert.equal(actor.id, "test@example.com");
     assert.equal(first.successor, squash);
 
     const events = await readEvents(repo, { reachableFrom: "main", kind: "conversation_turn" });

@@ -1,5 +1,5 @@
 import { git, type RepoInfo } from "./git.js";
-import type { Actor, EventDraft, EvidenceEvent } from "./schema.js";
+import type { EventDraft, EvidenceEvent } from "./schema.js";
 
 /**
  * Re-anchoring: a `re_anchor` event asserts that commits rewritten away by a
@@ -71,7 +71,7 @@ export interface ReAnchorDraftOptions {
    * Manual mappings pass the confirming user instead: two humans asserting
    * the same mapping yield two events, which is honest provenance.
    */
-  actor?: Actor;
+  actor?: { type: string; id?: string; display?: string };
 }
 
 /**
@@ -378,7 +378,7 @@ export function reAnchorDraft(opts: ReAnchorDraftOptions): EventDraft {
   return {
     kind: "re_anchor",
     occurred_at: opts.occurredAt,
-    actor: opts.actor ?? { type: "system" },
+    meta: { actor: opts.actor ?? { type: "system" } },
     producer: { tool: "annals" },
     content,
   };

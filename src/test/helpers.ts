@@ -73,8 +73,8 @@ export function draft(overrides: Partial<EventDraft> = {}): EventDraft {
   const base: EventDraft = {
     kind: "conversation_turn",
     occurred_at: "2026-01-01T00:00:00.000Z",
-    actor: { type: "human" },
     producer: { tool: "cledger" },
+    meta: { actor: { type: "human" } },
     content: { text: "hello" },
   };
   return { ...base, ...overrides };

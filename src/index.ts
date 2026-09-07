@@ -50,12 +50,10 @@ export {
   SCHEMA_VERSION,
 } from "./schema.js";
 export type {
-  Actor,
   EventDraft,
   EventLink,
   EvidenceEvent,
   Producer,
-  ProducerAgentContext,
   RepoContext,
   StreamRef,
 } from "./schema.js";

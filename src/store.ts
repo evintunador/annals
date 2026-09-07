@@ -23,7 +23,6 @@ import {
   finalizeEvent,
   parseEventLine,
   serializeEvent,
-  type Actor,
   type EventDraft,
   type EvidenceEvent,
   type RepoContext,
@@ -193,6 +192,28 @@ export async function appendEvents(
     });
     return finalizeEvent(records.length > 0 ? { ...redacted, redactions: records } : redacted);
   });
+  // Size policy: records carry pointers and spans, never large artifacts —
+  // notes replicate to every clone that fetches the ref. Oversize events
+  // warn by default; refusal is opt-in (limits.maxEventBytes) because a
+  // capture path must never drop records on size alone.
+  const warnBytes = config.limits?.warnEventBytes ?? 5_000_000;
+  const maxBytes = config.limits?.maxEventBytes;
+  for (const event of events) {
+    const bytes = Buffer.byteLength(serializeEvent(event), "utf8");
+    if (maxBytes !== undefined && bytes > maxBytes) {
+      throw new Error(
+        `${repo.ns.cliName}: event ${event.id.slice(0, 16)} (${event.kind}) is ${bytes} bytes, ` +
+          `over limits.maxEventBytes (${maxBytes}). Store a pointer + hash instead of the artifact.`,
+      );
+    }
+    if (bytes > warnBytes) {
+      process.stderr.write(
+        `${repo.ns.cliName}: event ${event.id.slice(0, 16)} (${event.kind}) is ${bytes} bytes — ` +
+          `git notes replicate to every clone; prefer a pointer + hash for large artifacts ` +
+          `(tune with limits.warnEventBytes in ${repo.ns.configFile}).\n`,
+      );
+    }
+  }
   return withLock(repo, async () => {
     await ensureMergeConfig(repo);
     // Almost everything anchors to HEAD at capture time; re-anchor mapping
@@ -277,14 +298,6 @@ export interface ReadOptions {
   kind?: string | string[];
   /** Exact match on `producer.tool` — the writer of the record. */
   tool?: string;
-  source?: string;
-  /**
-   * Exact match on `producer.model`. Events the source never labelled with a
-   * model (human turns in most transcripts, annals' own bookkeeping events)
-   * have no model and are therefore excluded by this filter, rather than
-   * being folded in on a guess about which model they belong to.
-   */
-  model?: string;
   /** Stream id, exact or prefix match. */
   stream?: string;
   /** Match records carrying a link with this `rel`. */
@@ -328,8 +341,6 @@ export async function readEvents(repo: Ledger, opts: ReadOptions = {}): Promise<
     (e) =>
       (!kinds || kinds.has(e.kind)) &&
       (!opts.tool || e.producer.tool === opts.tool) &&
-      (!opts.source || e.producer.source === opts.source) &&
-      (!opts.model || e.producer.model === opts.model) &&
       (!opts.linkRel || (e.links ?? []).some((l) => l.rel === opts.linkRel)) &&
       (!opts.stream || e.stream?.id === opts.stream ||
         e.stream?.id.startsWith(opts.stream)),
@@ -541,7 +552,7 @@ export async function manualReAnchor(
   }
 
   const identity = await gitUserIdentity(repo);
-  const actor: Actor = { type: "human" };
+  const actor: { type: string; id?: string; display?: string } = { type: "human" };
   if (identity.email) actor.id = identity.email;
   if (identity.name) actor.display = identity.name;
 
@@ -1270,7 +1281,7 @@ export async function redactEvent(
   // lock cycle) rather than being written inline above, so it behaves
   // exactly like any other captured event (dedup, context, validation).
   const identity = await gitUserIdentity(repo);
-  const actor: Actor = { type: "human" };
+  const actor: { type: string; id?: string; display?: string } = { type: "human" };
   if (identity.email) actor.id = identity.email;
   if (identity.name) actor.display = identity.name;
 
@@ -1284,7 +1295,7 @@ export async function redactEvent(
   const redactionDraft: EventDraft = {
     kind: "redaction",
     occurred_at: new Date().toISOString(),
-    actor,
+    meta: { actor },
     producer: { tool: "annals" },
     content: redactionContent,
     links: [{ rel: "redacts", target: located.event.id }],

@@ -38,6 +38,22 @@ export interface AnnalsConfig {
      */
     allowFingerprints?: string[];
   };
+  limits?: {
+    /**
+     * Warn on stderr when a single serialized event exceeds this many bytes
+     * (default 5_000_000). Notes replicate to every clone that fetches the
+     * ref, so events this size deserve a look — the append still succeeds:
+     * capture must never fail on size alone.
+     */
+    warnEventBytes?: number;
+    /**
+     * Refuse an event larger than this many bytes (default: off). Opt-in,
+     * for producers that would rather fail loudly than replicate a blob —
+     * a derived layer, say. Never enable on a capture path that must not
+     * drop records.
+     */
+    maxEventBytes?: number;
+  };
   transport?: {
     /** Install/run the pre-push hook that shares the ledger ref (default true). */
     hook?: boolean;
@@ -157,12 +173,14 @@ export async function loadConfig(repo: Ledger): Promise<AnnalsConfig> {
   const scan = mergeSection(base.scan, override.scan);
   const transport = mergeSection(base.transport, override.transport);
   const reanchor = mergeSection(base.reanchor, override.reanchor);
+  const limits = mergeSection(base.limits, override.limits);
   return {
     ...(enabled !== undefined ? { enabled } : {}),
     ...(redact !== undefined ? { redact } : {}),
     ...(scan !== undefined ? { scan } : {}),
     ...(transport !== undefined ? { transport } : {}),
     ...(reanchor !== undefined ? { reanchor } : {}),
+    ...(limits !== undefined ? { limits } : {}),
   };
 }
 

@@ -93,12 +93,6 @@ test("finalizeEvent: throws when occurred_at is not a valid date", () => {
   assert.throws(() => finalizeEvent(bad), /occurred_at must be ISO 8601/);
 });
 
-test("finalizeEvent: throws when actor.type is missing", () => {
-  const bad = draft() as EventDraft;
-  // @ts-expect-error deliberately constructing an invalid draft
-  bad.actor = {};
-  assert.throws(() => finalizeEvent(bad), /actor\.type is required/);
-});
 
 test("finalizeEvent: throws when producer.tool is missing", () => {
   const bad = draft() as EventDraft;
@@ -120,7 +114,6 @@ test("validateEvent: reports all problems at once for a broken event", () => {
     kind: "",
     occurred_at: "nope",
     recorded_at: "also-nope",
-    actor: { type: "" },
     producer: { tool: "" },
     content: undefined,
   } as unknown as EvidenceEvent;
