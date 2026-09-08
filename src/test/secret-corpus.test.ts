@@ -180,3 +180,36 @@ test("secret-corpus: gitleaks oracle (if available)", async (t) => {
     rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+// The split scheme exists so no stored fragment is itself detectable by a
+// public secret scanner. Learned the hard way: a Slack-shaped positive was
+// stored as prefix+body in part 0, which is a complete match for scanners
+// keyed on `xox?-` plus a dozen trailing chars — publishing this repo fired
+// a GitGuardian alert on the fixture file itself. Every part must be inert
+// alone, whatever it reassembles into.
+const PUBLIC_DETECTOR_SHAPES = [
+  /xox[bpoas]-[0-9A-Za-z-]{10,}/,
+  /ghp_[A-Za-z0-9]{36}/,
+  /github_pat_[A-Za-z0-9_]{20,}/,
+  /sk-ant-[A-Za-z0-9-]{20,}/,
+  /sk-[A-Za-z0-9]{40,}/,
+  /AKIA[0-9A-Z]{16}/,
+  /glpat-[A-Za-z0-9_-]{20}/,
+  /AIza[0-9A-Za-z_-]{35}/,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+];
+
+test("secret-corpus: no individual secret_part is detector-shaped on its own", () => {
+  for (const [i, entry] of corpus.positives.entries()) {
+    const parts = (entry as { secret_parts?: string[] }).secret_parts;
+    if (!parts) continue;
+    for (const [j, part] of parts.entries()) {
+      for (const shape of PUBLIC_DETECTOR_SHAPES) {
+        assert.ok(
+          !shape.test(part),
+          `positives[${i}].secret_parts[${j}] matches ${shape} by itself — re-split it`,
+        );
+      }
+    }
+  }
+});
