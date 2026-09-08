@@ -76,7 +76,14 @@ export interface EvidenceEvent {
    * envelope its concepts. Two store-level contracts, and they are the
    * whole design: `meta` is EXCLUDED from event identity (provenance can
    * be added or enriched later without the same fact getting a new id),
-   * and it IS walked by redaction and the secret scan (unlike `resolved`).
+   * and — like `resolved`, and like the actor/producer fields before the
+   * extraction — it is NOT walked by redaction or the secret scan. That is
+   * a contract on producers: structured provenance only (ids, names,
+   * labels), never free text or source material. Anything that could carry
+   * a secret belongs in `content` or `raw`, where the redaction stack
+   * applies; meta is also where session ids and hashes live, exactly the
+   * strings entropy scans false-positive on, so walking it would trade a
+   * non-risk for review noise.
    */
   meta?: Record<string, unknown>;
   /** IANA media type of `content`; defaults to application/json. */

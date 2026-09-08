@@ -49,13 +49,18 @@ store-level questions — is it in the id, and does redaction walk it:
 | field | in identity | redaction-walked |
 |---|---|---|
 | kind, occurred_at, stream, media_type, content, links | yes | content yes |
-| meta | **no** | **yes** |
+| meta | **no** | **no** — provenance only, never free text |
 | raw | no | yes (`raw.data`) |
 | producer, context, recorded_at, redactions | no | no |
 | resolved | no | **no** — never put payloads here |
 
 `meta` being identity-excluded is the point: provenance can be added or
-enriched later without the same fact getting a new id. A vocabulary that
+enriched later without the same fact getting a new id. It is not
+redaction-walked — the contract is structured provenance only (ids, names,
+labels); anything that could carry source text or a secret belongs in
+`content`/`raw`. This matches the pre-extraction behavior (actor/producer
+were never walked) and keeps UUID-heavy metadata out of the entropy scan's
+false-positive path. A vocabulary that
 needs one of its facts *in* identity puts it in `content`. Note the standing
 consequence: two records differing only by producer or meta dedup to one —
 byte-identical content is the same fact.

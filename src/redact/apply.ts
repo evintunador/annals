@@ -135,7 +135,7 @@ export function walkStrings(
 }
 
 /**
- * Deep-walk draft.content, draft.raw.data, and draft.meta, redacting string values only
+ * Deep-walk draft.content and draft.raw.data, redacting string values only
  * (never object keys). Returns a new draft — the input is never mutated —
  * plus the list of redaction records with JSON-pointer-ish paths such as
  * "content/blocks/2/text" or "raw/data/message/content/0/text".
@@ -165,9 +165,6 @@ export function redactDraft(
   const newDraft: EventDraft = { ...draft, content: walkStrings(draft.content, "content", redactString) };
   if (draft.raw) {
     newDraft.raw = { ...draft.raw, data: walkStrings(draft.raw.data, "raw/data", redactString) };
-  }
-  if (draft.meta) {
-    newDraft.meta = walkStrings(draft.meta, "meta", redactString) as Record<string, unknown>;
   }
   return { draft: newDraft, records };
 }
