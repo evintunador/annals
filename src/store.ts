@@ -984,6 +984,12 @@ export async function transportPush(
   remote: string,
   revs?: string[],
 ): Promise<TransportPushResult> {
+  // Recursion breaker. The pre-push hook already checks this guard, but the
+  // hook text on disk can predate a guard rename (hooks only self-upgrade on
+  // append, never on push) — and a hook/CLI guard mismatch otherwise storms:
+  // hook -> transport-push -> notes push -> hook -> ... with a full scan at
+  // every level. Observed in the wild before this check existed.
+  if (process.env[internalEnvVar(repo.ns)]) return { pushed: false, held: false };
   const config = await loadConfig(repo);
   if (config.transport?.hook === false) return { pushed: false, held: false };
   const hasNotes = (await git(["rev-parse", "--verify", "--quiet", notesRef(repo.ns)], {

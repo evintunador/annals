@@ -19,6 +19,12 @@ export interface NamespaceConfig {
    * to `<name>-incoming`; overridable so a namespace that predates annals
    * can keep the refspec already installed in existing repos. */
   incomingName: string;
+  /** Env var that suppresses the pre-push hook while this namespace's own
+   * notes push runs. Defaults to NAME_INTERNAL (uppercased, non-alnum → _);
+   * overridable so a namespace that predates annals keeps the guard its
+   * already-installed hooks check — a mismatch here recurses: hook →
+   * transport-push → notes push → hook … */
+  internalEnvName: string;
   /** Directory under the repo's common git dir for local state (pending
    * events, allowlist, known-secrets). Defaults to `name`. */
   stateDirName: string;
@@ -50,6 +56,8 @@ export function resolveNamespace(opts: Partial<NamespaceConfig> = {}): Namespace
   return {
     name,
     incomingName: opts.incomingName ?? `${name}-incoming`,
+    internalEnvName:
+      opts.internalEnvName ?? name.toUpperCase().replace(/[^A-Z0-9]/g, "_") + "_INTERNAL",
     stateDirName: opts.stateDirName ?? name,
     configFile: opts.configFile ?? `.${name}.json`,
     userConfigDir: opts.userConfigDir ?? name,

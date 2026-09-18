@@ -11,7 +11,7 @@ const execFileP = promisify(execFile);
 
 /** Env var that suppresses the pre-push hook while annals itself pushes. */
 export function internalEnvVar(ns: NamespaceConfig): string {
-  return ns.name.toUpperCase().replace(/[^A-Z0-9]/g, "_") + "_INTERNAL";
+  return ns.internalEnvName;
 }
 
 /**
