@@ -1,5 +1,6 @@
 /**
- * Opt-in local store of confirmed secrets, retained only as salted digests.
+ * Opt-in local store of confirmed secrets, retained only as salted digests
+ * (see docs/architecture.md "Privacy and integrity").
  * Capture checks candidate string windows against those digests, so it can
  * still exact-match a remembered value without keeping a reversible copy.
  *

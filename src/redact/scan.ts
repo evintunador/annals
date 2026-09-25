@@ -1,6 +1,6 @@
 /**
- * Sync-time secret scan (layer E, see docs/WIP_TECHNICAL_DESIGN.md "Privacy
- * and integrity"). Unlike capture-tier redaction (apply.ts), this scanner
+ * Sync-time secret scan (see docs/architecture.md "Privacy and integrity").
+ * Unlike capture-tier redaction (apply.ts), this scanner
  * never rewrites anything — it only reports findings so a human can decide
  * whether to redact the event, allow the fingerprint as
  * a known false positive, or push anyway with `--no-scan`. Rules may
@@ -265,22 +265,22 @@ export function inAgentSession(env: NodeJS.ProcessEnv = process.env): string | n
  * human should go look, an agent should stop and say so.
  */
 export function findingGuidance(cliName: string, eventIds: string[]): string {
-  // Prefix, not the full 68-char id: `inspect` takes a prefix, and the short
-  // form is what the finding lines above already show.
-  const first = (eventIds[0] ?? "<event-id>").slice(0, 16);
+  // Kept in the public signature because callers already supply these details,
+  // but guidance stays capability-neutral: NamespaceConfig only promises a
+  // transport-push entrypoint, not any particular remediation commands.
+  void cliName;
+  void eventIds;
   return [
     "  No excerpt is printed. The text around a match is what tripped the rule,",
     "  so reprinting it into a session that gets captured creates a new event",
     "  that trips the same rule — findings then multiply on every scan.",
     "",
-    "  If you are a HUMAN: review these in a plain terminal, outside any agent:",
-    `      ${cliName} review`,
-    "  It steps through each distinct span with context, the match highlighted,",
-    "  and one key to allow or redact. (Or write a report file for one event:",
-    `      ${cliName} inspect ${first} )`,
+    "  If you are a HUMAN: use the owning producer's documented review workflow",
+    "  in a plain terminal, outside any agent. Producer libraries expose the",
+    "  primitives needed to review, redact, or allow a finding.",
     "",
     "  If you are an AGENT: stop here and hand this to the human. Do not run",
-    `  ${cliName} review, inspect, export, or otherwise read the flagged content —`,
+    "  the producer review workflow or otherwise read the flagged content —",
     "  it would be captured into this conversation and re-seed the finding.",
   ].join("\n");
 }
@@ -292,16 +292,26 @@ export function findingGuidance(cliName: string, eventIds: string[]): string {
  * next command without giving an agent anything tempting to inspect.
  */
 export function conciseFindingGuidance(cliName: string, remote: string): string {
+  const human =
+    cliName === "annals"
+      ? [
+          "  If you are a HUMAN: rerun in a plain terminal, outside any agent:",
+          `      annals sync ${remote} --report`,
+        ]
+      : [
+          "  If you are a HUMAN: use the owning producer's documented workflow",
+          "  to rerun the sync with its finding report enabled, in a plain terminal",
+          "  outside any agent.",
+        ];
   return [
     "  Finding details were suppressed.",
     "",
-    "  If you are a HUMAN: rerun in a plain terminal, outside any agent:",
-    `      ${cliName} sync ${remote} --report`,
+    ...human,
     "  The report contains coordinates and fingerprints, never matched text",
     "  or surrounding context.",
     "",
-    "  If you are an AGENT: stop here and hand this to the human. Do not add",
-    `  --report or run ${cliName} review, inspect, export, or otherwise read the`,
+    "  If you are an AGENT: stop here and hand this to the human. Do not enable",
+    "  the report or run the producer review workflow, inspect, export, or read the",
     "  flagged content — it would be captured into this conversation.",
   ].join("\n");
 }
@@ -324,9 +334,9 @@ function allowlistPath(repo: Ledger): string {
  * a property of the *text* (a fixture, a doc example), not of the repo it was
  * captured in — the same span flagged here today gets flagged in the next
  * repo that reads the same file or quotes the same doc. Observed while
- * dogfooding: 2 of turnbridge's 4 outstanding fingerprints were already
- * human-approved in conversation-ledger's per-repo allowlist, waiting to be
- * re-reviewed from scratch.
+ * dogfooding: the same outstanding fingerprints were already human-approved
+ * in another repo's namespace-local allowlist, waiting to be re-reviewed from
+ * scratch.
  */
 function globalAllowlistPath(repo: Ledger): string {
   return join(homedir(), ".config", repo.ns.userConfigDir, "allowlist.json");
@@ -345,7 +355,7 @@ async function readAllowlistFile(path: string): Promise<string[]> {
 
 /**
  * Union of every allowlist tier: the repo-local file under `.git/`, the
- * user-global file under `~/.config/cledger/`, and — when the caller passes
+ * user-global file under `~/.config/<namespace>/`, and — when the caller passes
  * config — `scan.allowFingerprints` from the repo/global config, the
  * only tier that travels with a clone. All rebuildable-if-lost state, never
  * the record of truth; a fingerprint in any tier suppresses the finding.

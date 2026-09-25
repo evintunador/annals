@@ -54,7 +54,7 @@ export { ensureMergeConfig } from "./transport.js";
 
 /**
  * Storage model: one git note per anchor commit under refs/notes/
- * conversation-ledger. The note body is JSONL — one canonical-JSON event
+ * the selected ledger namespace. The note body is JSONL — one canonical-JSON event
  * per line, lexicographically sorted, unique. Everything lives in the note
  * blob itself (no out-of-tree pointers), so records are reachable from the
  * ref, GC-safe, travel with `git push`/`fetch` of that one ref, and merge
@@ -873,11 +873,8 @@ async function runScanGate(
     process.stderr.write(`${formatGroupedReport(findings)}\n`);
     process.stderr.write(`\n${findingGuidance(repo.ns.cliName, eventIds)}\n`);
     process.stderr.write(
-      "\nRemediate, then re-run sync:\n" +
-        `  ${repo.ns.cliName} review                walk each span interactively (humans, plain terminal)\n` +
-        `  ${repo.ns.cliName} redact <event-id>     rewrite the event and remove the secret\n` +
-        `  ${repo.ns.cliName} allow <fingerprint>   mark a fingerprint as a known false positive\n` +
-        `  ${repo.ns.cliName} sync --no-scan        skip this gate for this sync only\n`,
+      "\nUse the owning producer's documented workflow to review and remediate the finding, " +
+        "then retry this sync. A caller may explicitly bypass the gate with skipScan/--no-scan.\n",
     );
   } else {
     process.stderr.write(`${conciseFindingGuidance(repo.ns.cliName, remote)}\n`);
@@ -1033,8 +1030,7 @@ export async function transportPush(
       if (config.transport?.strict === true) throw err;
       process.stderr.write(
         `${repo.ns.cliName}: records were held back from this push (potential secrets); ` +
-          `your code push continues. Run \`${repo.ns.cliName} sync ${remote} ` +
-          "--report` in a plain terminal to review and remediate.\n",
+          "your code push continues. Follow the review guidance above, then retry the push.\n",
       );
       return { pushed: false, held: true };
     }

@@ -72,7 +72,7 @@ test("scanEvents: standard tier finds a keyword-anchored secret in both content 
 
 test("scanEvents: keyword-assignment ignores source code that merely talks about secrets", () => {
   // The false-positive class that dogfooding surfaced: type annotations and
-  // template interpolation in cledger's own redaction source. None of these
+  // template interpolation in the scanner's own source. None of these
   // carry an actual credential.
   const codeShapes = [
     "function maskMatch(secret: string): string { return x; }",
@@ -520,9 +520,16 @@ test("inAgentSession detects the harness markers it guards against", () => {
 });
 
 test("findingGuidance addresses humans and agents separately", () => {
-  const g = findingGuidance("annals", ["ev2-abc123"]);
+  const g = findingGuidance("producer-cli", ["ev2-abc123"]);
   assert.match(g, /HUMAN/);
   assert.match(g, /AGENT/);
-  assert.match(g, /annals inspect ev2-abc123/, "must name the actual event to inspect");
+  assert.match(g, /owning producer's documented review workflow/);
   assert.match(g, /Do not run/, "must tell an agent to stop, not just warn");
+});
+
+test("findingGuidance never assumes optional producer CLI commands", () => {
+  for (const cliName of ["annals", "producer-cli"]) {
+    const g = findingGuidance(cliName, ["ev2-abc123"]);
+    assert.doesNotMatch(g, new RegExp(`${cliName} (?:review|inspect|redact|allow)`));
+  }
 });

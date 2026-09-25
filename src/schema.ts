@@ -12,7 +12,7 @@ export const SCHEMA_VERSION = "annals/v1";
  * (anchor commits were rewritten away by a squash/rebase).
  */
 export interface Producer {
-  /** Tool that wrote this event, e.g. "cledger", "turnbridge". Pairs with
+  /** Tool that wrote this event, e.g. "example-app". Pairs with
    * `kind` to identify a vocabulary: a third-party kind is addressed as
    * (producer.tool, kind), never by kind alone. Not part of event identity —
    * two tools recording byte-identical facts dedup to one event. */
@@ -93,8 +93,8 @@ export interface EvidenceEvent {
   /** Repository context at capture time. Not part of identity. */
   context?: RepoContext;
   /** Grouping + ordering: which stream of records this belongs to and
-   * where. For cledger a stream is a conversation; for a training-run
-   * producer it might be a run. */
+   * where. For one producer a stream may be a conversation; for another it
+   * may be a training run. */
   stream?: StreamRef;
   links?: EventLink[];
   /**

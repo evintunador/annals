@@ -8,9 +8,8 @@ import type { RepoInfo } from "./git.js";
  *
  * Producers that own a vocabulary and want an independently-pushable,
  * independently-wipeable ref open their own namespace. Producers extending
- * an existing vocabulary (the way turnbridge writes `continuation` events
- * into cledger's conversations) write into that vocabulary's namespace
- * through its owner's API instead.
+ * an existing vocabulary write into that vocabulary's namespace through its
+ * owner's API instead.
  */
 export interface NamespaceConfig {
   /** Namespace name. Records live at `refs/notes/<name>`. */

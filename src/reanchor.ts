@@ -135,7 +135,7 @@ export interface DetectedRewrite {
 
 /**
  * A noted branch that looks rewritten but could not be exactly mapped —
- * the input to `cledger re-anchor`'s suggestion tier (reanchor-suggest.ts).
+ * the input to the explicit suggestion tier (reanchor-suggest.ts).
  */
 export interface UnmatchedBranch {
   branch: string;
@@ -169,7 +169,7 @@ export interface DetectRewritesResult {
  * change) or "Rebase and merge" / bot rewrite (per-commit equivalents) — and
  * propose exact mappings. Detection is purely mechanical: a mapping is
  * proposed only when patch-ids (or trees) match exactly; anything fuzzier is
- * a human call and belongs to `cledger re-anchor`'s confirm flow. Branches
+ * a human call and belongs to a producer CLI's confirm flow. Branches
  * with no noted commits are skipped outright: mappings exist to rescue
  * conversations, not to catalog every merge.
  *

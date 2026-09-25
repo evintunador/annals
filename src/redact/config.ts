@@ -6,18 +6,17 @@ import { rulesForTier, type RedactionRule } from "./rules.js";
 
 export interface AnnalsConfig {
   /**
-   * Master per-repo switch (default true). false turns cledger off entirely
-   * for this repo: appendEvents becomes a no-op (no hook capture, no manual
-   * `cledger append`, no backfill), before any ledger read/write happens.
-   * Existing recorded history is untouched and still readable via `cledger
-   * log`/`show`/`export` — this only stops new events from being written.
+   * Master per-repo switch (default true). false turns appends off entirely
+   * for this namespace: appendEvents becomes a no-op before any ledger
+   * read/write happens. Existing recorded history remains readable; this only
+   * stops new events from being written.
    */
   enabled?: boolean;
   redact?: {
     capture?: boolean;
     env?: boolean;
     /**
-     * Opt-in (default false). When true, `cledger redact --pattern` remembers
+     * Opt-in (default false). When true, a redact workflow remembers
      * the exact values it scrubbed in a local, git-invisible store, and
      * capture-time redaction exact-matches them out of every future event.
      * Off means the store is never read or created. See redact/known-secrets.ts.
@@ -28,10 +27,10 @@ export interface AnnalsConfig {
   scan?: {
     tier?: "standard" | "paranoid" | "off";
     /**
-     * Fingerprints of known false positives, same values `cledger allow`
-     * records. Unlike the allowlist files under `.git/`, these travel with
-     * the config: a repo can commit its own recurring false positives in
-     * `.cledger.json` so every clone and worktree inherits them, and the
+     * Fingerprints of known false positives, matching the values an allow
+     * workflow records. Unlike allowlist files under `.git/`, these travel
+     * with configuration: a repo can commit recurring false positives so
+     * every clone and worktree inherits them, and the
      * global config can carry personal ones. Fingerprints are truncated
      * sha256 of the matched span — of text a human judged to NOT be a
      * secret — so committing them discloses nothing.
@@ -71,13 +70,13 @@ export interface AnnalsConfig {
      * Auto-append re_anchor mappings for exact (tree / patch-id) matches
      * when a fetch shows the remote target branch rewrote local commits
      * that carry conversations (default true). Fuzzy matches are never
-     * auto-applied regardless of this flag — see `cledger re-anchor`.
+     * auto-applied regardless of this flag; producer CLIs confirm those.
      */
     auto?: boolean;
     /**
      * Query the forge (via the user's own CLI session, e.g. `gh`) for PR
-     * metadata when ranking suggestion candidates in the explicit
-     * `cledger re-anchor` command (default true). Never queried in the
+     * metadata when ranking candidates in an explicit re-anchor workflow
+     * (default true). Never queried in the
      * auto read path, which stays offline regardless.
      */
     forge?: boolean;
@@ -92,7 +91,7 @@ const NON_SECRET_ENV_NAME = /^(?:PATH|HOME|PWD|OLDPWD|SHELL|TERM.*|USER|LOGNAME|
  *
  * Absent config is the normal case and stays silent. But a *present* file
  * that fails to parse used to be indistinguishable from one that isn't
- * there — so a single trailing comma in `.cledger.json` silently reverted
+ * there — so a single trailing comma in a namespace config silently reverted
  * every setting to its default, including the opt-in redaction layers whose
  * entire purpose is being switched on. Failing open is the right behavior
  * (capture must never break a session over config), but failing open
@@ -130,7 +129,7 @@ async function readJsonConfig(cliName: string, path: string): Promise<AnnalsConf
  * Merge one top-level section key-by-key: any key the repo config sets wins,
  * any key it leaves out keeps the global value. Before 0.21.0 the repo
  * section replaced the global one wholesale, which failed open: a repo
- * `.cledger.json` that set only `redact.capture` silently reverted a
+ * config file that set only `redact.capture` silently reverted a
  * globally-enabled `redact.knownSecrets` — the user believed a protection
  * was on when the mere presence of an unrelated key had turned it off.
  *
