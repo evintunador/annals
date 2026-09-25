@@ -39,7 +39,7 @@ import {
 } from "./reanchor.js";
 import { collectMatches, redactDraft, type ExtraValueGroup, type RedactionRecord } from "./redact/apply.js";
 import { captureRules, collectEnvValues, loadConfig, type AnnalsConfig } from "./redact/config.js";
-import { addKnownSecrets, loadKnownSecrets } from "./redact/known-secrets.js";
+import { knownSecretCount, loadKnownSecrets, rememberKnownSecrets } from "./redact/known-secrets.js";
 import { RULESET_VERSION, type RedactionRule } from "./redact/rules.js";
 import {
   filterFindings,
@@ -173,10 +173,11 @@ export async function appendEvents(
   // audit trail. Only consulted when capture redaction is active at all
   // (rules.length > 0); known-secrets additionally requires its opt-in flag.
   const extraValues: ExtraValueGroup[] = [];
+  let knownSecrets: Awaited<ReturnType<typeof loadKnownSecrets>> | undefined;
   if (rules.length > 0) {
     if (config.redact?.knownSecrets === true) {
       const known = await loadKnownSecrets(repo);
-      if (known.length > 0) extraValues.push({ ruleId: "known-secret", values: known });
+      if (knownSecretCount(known) > 0) knownSecrets = known;
     }
     if (config.redact?.env === true) {
       const env = await collectEnvValues(repo.root);
@@ -189,6 +190,7 @@ export async function appendEvents(
     const { draft: redacted, records } = redactDraft(withContext, {
       rules,
       ...(extraValues.length > 0 ? { extraValues } : {}),
+      ...(knownSecrets ? { knownSecrets } : {}),
     });
     return finalizeEvent(records.length > 0 ? { ...redacted, redactions: records } : redacted);
   });
@@ -1274,13 +1276,11 @@ export async function redactEvent(
   });
 
   // Persist remembered secret values outside the notes lock (the store is its
-  // own file under .git/, unrelated to the notes ref). addKnownSecrets applies
-  // the min-length filter and dedups, returning how many were newly stored.
+  // own file under .git/, unrelated to the notes ref). rememberKnownSecrets
+  // applies the min-length filter and digest dedup and returns the added count.
   let knownSecretsRemembered = 0;
   if (rememberSecrets && secretValues.length > 0) {
-    const before = (await loadKnownSecrets(repo)).length;
-    await addKnownSecrets(repo, secretValues);
-    knownSecretsRemembered = (await loadKnownSecrets(repo)).length - before;
+    knownSecretsRemembered = await rememberKnownSecrets(repo, secretValues);
   }
 
   // Companion event: goes through the normal appendEvents path (its own

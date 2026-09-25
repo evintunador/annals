@@ -70,7 +70,14 @@ export {
 export type { GitUserIdentity, RepoInfo } from "./git.js";
 export { captureRules, collectEnvValues, loadConfig } from "./redact/config.js";
 export type { AnnalsConfig } from "./redact/config.js";
-export { addKnownSecrets, loadKnownSecrets } from "./redact/known-secrets.js";
+export {
+  addKnownSecrets,
+  knownSecretCount,
+  loadKnownSecrets,
+  matchingKnownSecrets,
+  rememberKnownSecrets,
+} from "./redact/known-secrets.js";
+export type { KnownSecretDigest, KnownSecrets } from "./redact/known-secrets.js";
 export { RULES, RULESET_VERSION, rulesForTier, shannonEntropy } from "./redact/rules.js";
 export type { RedactionRule, RuleTier } from "./redact/rules.js";
 export {
