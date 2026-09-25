@@ -62,6 +62,11 @@ does not yet promise a stable public API.
 - `npm test` builds and runs the complete test suite.
 - `npm pack --dry-run` previews the eventual published package.
 
+GitHub Actions runs the documentation and test checks on Node.js 20, 22, 24,
+and 26 for every pull request and push to `main`. A separate job installs a
+checksum-pinned gitleaks binary and sets `ANNALS_REQUIRE_GITLEAKS=1`, turning
+the normally optional external oracle into a required test.
+
 ## Release status
 
 The package metadata is present to exercise the real package shape, but there
