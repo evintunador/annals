@@ -285,6 +285,27 @@ export function findingGuidance(cliName: string, eventIds: string[]): string {
   ].join("\n");
 }
 
+/**
+ * Coordinates and fingerprints are useful when somebody deliberately asks
+ * for a report, but noisy enough to feed back into captured conversations.
+ * The default scan path prints only this pointer, which gives a human a safe
+ * next command without giving an agent anything tempting to inspect.
+ */
+export function conciseFindingGuidance(cliName: string, remote: string): string {
+  return [
+    "  Finding details were suppressed.",
+    "",
+    "  If you are a HUMAN: rerun in a plain terminal, outside any agent:",
+    `      ${cliName} sync ${remote} --report`,
+    "  The report contains coordinates and fingerprints, never matched text",
+    "  or surrounding context.",
+    "",
+    "  If you are an AGENT: stop here and hand this to the human. Do not add",
+    `  --report or run ${cliName} review, inspect, export, or otherwise read the`,
+    "  flagged content — it would be captured into this conversation.",
+  ].join("\n");
+}
+
 /** Findings whose fingerprint has been allowlisted (known false positive) are suppressed. */
 export function filterFindings(findings: Finding[], allowlist: Set<string>): Finding[] {
   return findings.filter((f) => !allowlist.has(f.fingerprint));

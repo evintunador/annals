@@ -31,6 +31,8 @@ export type {
   ReAnchorRunResult,
   RedactResult,
   SyncResult,
+  SyncOptions,
+  TransportPushOptions,
   TransportPushResult,
 } from "./store.js";
 export {
@@ -91,6 +93,7 @@ export type { ExtraValueGroup, RedactionRecord } from "./redact/apply.js";
 export {
   addToAllowlist,
   collectStrings,
+  conciseFindingGuidance,
   filterFindings,
   findingGuidance,
   FIXTURE_MARKER_RE,
