@@ -4,6 +4,7 @@ import { git } from "../git.js";
 import { shannonEntropy } from "../redact/rules.js";
 import {
   addToAllowlist,
+  conciseFindingGuidance,
   filterFindings,
   findingGuidance,
   formatFinding,
@@ -532,4 +533,14 @@ test("findingGuidance never assumes optional producer CLI commands", () => {
     const g = findingGuidance(cliName, ["ev2-abc123"]);
     assert.doesNotMatch(g, new RegExp(`${cliName} (?:review|inspect|redact|allow)`));
   }
+});
+
+test("conciseFindingGuidance only recommends --report for the bundled annals CLI", () => {
+  const annals = conciseFindingGuidance("annals");
+  assert.match(annals, /same sync command[\s\S]*--report/);
+
+  const producer = conciseFindingGuidance("producer-cli");
+  assert.match(producer, /owning producer's documented workflow/);
+  assert.match(producer, /reportFindings/);
+  assert.doesNotMatch(producer, /--report/);
 });

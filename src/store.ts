@@ -898,8 +898,6 @@ export interface SyncOptions {
   scope?: string | string[] | null;
   /** Print the coordinate-only finding report when the scan gate blocks. */
   reportFindings?: boolean;
-  /** @internal Select pre-push wording when transportPush delegates here. */
-  scanInvocation?: "sync" | "transport";
 }
 
 /**
@@ -913,6 +911,16 @@ export async function sync(
   remote = "origin",
   mode: "both" | "push" | "fetch" = "both",
   opts: SyncOptions = {},
+): Promise<SyncResult> {
+  return syncWithInvocation(repo, remote, mode, opts, "sync");
+}
+
+async function syncWithInvocation(
+  repo: Ledger,
+  remote: string,
+  mode: "both" | "push" | "fetch",
+  opts: SyncOptions,
+  scanInvocation: "sync" | "transport",
 ): Promise<SyncResult> {
   const result: SyncResult = { fetched: false, pushed: false, scopedAnchors: null };
   await ensureMergeConfig(repo);
@@ -943,7 +951,7 @@ export async function sync(
         anchors,
         config,
         opts.reportFindings === true,
-        opts.scanInvocation ?? "sync",
+        scanInvocation,
       );
     }
     // The pushed child git inherits the internal guard env var, telling the
@@ -1040,11 +1048,16 @@ export async function transportPush(
   try {
     // No usable refs (deletes only, or an old hook that ate stdin): fall back
     // to the checked-out branch rather than to the whole ledger.
-    await sync(repo, remote, "push", {
-      scope: revs && revs.length > 0 ? revs : ["HEAD"],
-      scanInvocation: "transport",
-      ...(opts.reportFindings === true ? { reportFindings: true } : {}),
-    });
+    await syncWithInvocation(
+      repo,
+      remote,
+      "push",
+      {
+        scope: revs && revs.length > 0 ? revs : ["HEAD"],
+        ...(opts.reportFindings === true ? { reportFindings: true } : {}),
+      },
+      "transport",
+    );
     return { pushed: true, held: false };
   } catch (err) {
     if (err instanceof ScanBlockedError) {

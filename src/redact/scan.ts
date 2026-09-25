@@ -293,16 +293,25 @@ export function findingGuidance(cliName: string, eventIds: string[]): string {
  */
 // The unused remote remains optional for source compatibility with callers of
 // the first public version. Interpolating it cannot reconstruct the caller's
-// mode, scope, or tier flags, and downstream CLIs need not use annals' own
-// argument syntax, so the only accurate instruction is to amend the same
-// command the human already ran.
+// mode, scope, or tier flags. The bundled annals CLI has known syntax, so its
+// user can safely amend the same command; downstream CLI syntax is deliberately
+// capability-neutral.
 export function conciseFindingGuidance(cliName: string, _remote?: string): string {
-  void cliName;
+  const human =
+    cliName === "annals"
+      ? [
+          "  If you are a HUMAN: rerun this same sync command in a plain terminal,",
+          "  outside any agent, adding --report.",
+        ]
+      : [
+          "  If you are a HUMAN: use the owning producer's documented workflow in",
+          "  a plain terminal, outside any agent, enabling its finding report while",
+          "  preserving the original remote and scope (the library option is reportFindings).",
+        ];
   return [
     "  Finding details were suppressed.",
     "",
-    "  If you are a HUMAN: rerun this same sync command in a plain terminal,",
-    "  outside any agent, adding --report.",
+    ...human,
     "  The report contains coordinates and fingerprints, never matched text",
     "  or surrounding context.",
     "",
