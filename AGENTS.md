@@ -37,7 +37,7 @@ npm run check
 sentinels. It cannot prove semantic agreement. Review still needs to verify
 that prose describes behavior and tradeoffs rather than merely naming current
 symbols. This file makes that responsibility visible to coding agents at the
-start of a task.
+start of a task, and CI runs it across every supported Node.js release line.
 
 ## Secret-shaped fixtures
 

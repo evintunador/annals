@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { rulesForTier, RULESET_VERSION } from "../redact/rules.js";
 import { redactText } from "../redact/apply.js";
 
@@ -62,7 +63,7 @@ test("secret-corpus: all positives are redacted", () => {
   const rules = rulesForTier("capture");
   const failures: string[] = [];
 
-  for (const positive of corpus.positives) {
+  for (const [i, positive] of corpus.positives.entries()) {
     const { text, matches } = redactText(positive.context, rules);
 
     // Secret must not appear verbatim in redacted output
@@ -83,7 +84,7 @@ test("secret-corpus: all positives are redacted", () => {
     const ruleMatches = matches.filter((m) => m.rule === positive.rule);
     if (ruleMatches.length === 0) {
       failures.push(
-        `${positive.rule}: no matches found for rule in ${positive.context.substring(0, 50)}...`,
+        `positives[${i}] (${positive.rule}): no matches found for expected rule`,
       );
     }
   }
@@ -123,57 +124,83 @@ test("secret-corpus: redaction is deterministic", () => {
   const first = redactText(allContexts, rules);
   const second = redactText(allContexts, rules);
 
-  assert.deepStrictEqual(first, second, "redaction must be deterministic");
-  assert.strictEqual(
-    first.text,
-    second.text,
+  assert.ok(
+    isDeepStrictEqual(first, second),
+    "redaction result must be deterministic",
+  );
+  assert.ok(
+    first.text === second.text,
     "redacted text must be identical across runs",
   );
-  assert.deepStrictEqual(
-    first.matches,
-    second.matches,
+  assert.ok(
+    isDeepStrictEqual(first.matches, second.matches),
     "matches must be identical across runs",
   );
 });
 
 test("secret-corpus: gitleaks oracle (if available)", async (t) => {
+  const gitleaksBin = process.env["GITLEAKS_BIN"] || "gitleaks";
   // Check if gitleaks is available
-  const versionCheck = spawnSync("gitleaks", ["version"], {
+  const versionCheck = spawnSync(gitleaksBin, ["version"], {
     stdio: "pipe",
     encoding: "utf-8",
   });
 
   if (versionCheck.status !== 0) {
+    assert.notStrictEqual(
+      process.env["ANNALS_REQUIRE_GITLEAKS"],
+      "1",
+      "ANNALS_REQUIRE_GITLEAKS=1 but gitleaks is not available on PATH",
+    );
     t.skip();
     return;
   }
 
-  // Create temp directory for redacted files
+  // Create temp directories for a detector efficacy control and redacted files.
+  // Scanner output stays captured and --redact provides defense in depth: a
+  // failed assertion must never print runtime-reassembled fixture values.
   const tempDir = mkdtempSync(join(tmpdir(), "secret-corpus-gitleaks-"));
 
   try {
     const rules = rulesForTier("capture");
+    const controlDir = join(tempDir, "control");
+    const redactedDir = join(tempDir, "redacted");
+    mkdirSync(controlDir);
+    mkdirSync(redactedDir);
 
-    // Write each positive's redacted context to a temp file
+    // A clean-only oracle could pass when the detector is broken or has no
+    // active rules. First prove this exact binary rejects the unredacted,
+    // runtime-reassembled corpus, then ask it to approve the redacted corpus.
     for (let i = 0; i < corpus.positives.length; i++) {
       const positive = corpus.positives[i];
       if (!positive) continue;
       const { text } = redactText(positive.context, rules);
-      const filePath = join(tempDir, `positive-${i}.txt`);
-      writeFileSync(filePath, text, "utf-8");
+      writeFileSync(join(controlDir, `positive-${i}.txt`), positive.context, "utf-8");
+      writeFileSync(join(redactedDir, `positive-${i}.txt`), text, "utf-8");
     }
 
-    // Run gitleaks on the temp directory
-    const gitleaksRun = spawnSync("gitleaks", ["detect", "--no-git", "--source", tempDir, "--exit-code", "1"], {
+    const controlRun = spawnSync(gitleaksBin, [
+      "detect", "--no-git", "--source", controlDir, "--exit-code", "1", "--redact", "--no-banner",
+    ], {
       stdio: "pipe",
       encoding: "utf-8",
     });
+    assert.strictEqual(
+      controlRun.status,
+      1,
+      `gitleaks positive control returned status ${String(controlRun.status)} instead of finding status 1`,
+    );
 
-    // Exit code 0 means no leaks found, which is what we want
+    const gitleaksRun = spawnSync(gitleaksBin, [
+      "detect", "--no-git", "--source", redactedDir, "--exit-code", "1", "--redact", "--no-banner",
+    ], {
+      stdio: "pipe",
+      encoding: "utf-8",
+    });
     assert.strictEqual(
       gitleaksRun.status,
       0,
-      `gitleaks found leaks in redacted output: ${gitleaksRun.stdout}`,
+      `gitleaks redacted-output check returned status ${String(gitleaksRun.status)} instead of 0`,
     );
   } finally {
     // Clean up temp directory
@@ -200,10 +227,10 @@ const PUBLIC_DETECTOR_SHAPES = [
 ];
 
 test("secret-corpus: no individual secret_part is detector-shaped on its own", () => {
-  for (const [i, entry] of corpus.positives.entries()) {
-    const parts = (entry as { secret_parts?: string[] }).secret_parts;
-    if (!parts) continue;
-    for (const [j, part] of parts.entries()) {
+  let checked = 0;
+  for (const [i, entry] of stored.positives.entries()) {
+    for (const [j, part] of entry.secret_parts.entries()) {
+      checked++;
       for (const shape of PUBLIC_DETECTOR_SHAPES) {
         assert.ok(
           !shape.test(part),
@@ -212,4 +239,5 @@ test("secret-corpus: no individual secret_part is detector-shaped on its own", (
       }
     }
   }
+  assert.ok(checked > 0, "fixture must contain secret_parts for the safety guard to inspect");
 });
