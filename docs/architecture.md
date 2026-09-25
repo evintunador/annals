@@ -4,6 +4,10 @@ annals is an append-only event store built on git notes. It gives producer
 packages a durable envelope and transport without learning what their records
 mean. This document describes the invariants behind that boundary.
 
+The [VCS compatibility investigation](vcs-compatibility-investigation.md)
+records exploratory Jujutsu results and open product decisions; it does not
+extend the current support contract.
+
 ## Responsibilities
 
 annals owns:
