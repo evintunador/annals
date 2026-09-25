@@ -56,8 +56,10 @@ no-op, including transport setup. Existing records remain readable.
   `.env`. An explicit list of routine shell-variable names and values beginning
   with `/` are excluded; variable names otherwise do not need to look secret.
 - `knownSecrets` defaults to `false`. A producer's redact workflow may remember
-  confirmed values in a mode-0600 file below the common git directory so later
-  captures scrub them. The plaintext values are local and never committed.
+  confirmed values as salted digests in a mode-0600 file below the common git
+  directory so later captures scrub them. Legacy plaintext stores are read for
+  compatibility and migrated to digests on the next update. The store is local
+  and never committed.
 - `patterns` adds JavaScript regular expressions to the capture tier. Patterns
   are compiled with the global flag. Invalid patterns are skipped because
   configuration must not break capture.

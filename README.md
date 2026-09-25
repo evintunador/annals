@@ -85,14 +85,16 @@ The bundled CLI is deliberately limited to transport for the default `annals`
 namespace:
 
 ```text
-annals sync [remote] [--no-scan] [--all]
-annals transport-push [remote]
+annals sync [remote] [--no-scan] [--all] [--report]
+annals transport-push [remote] [--report]
 ```
 
 `sync` fetches, merges, scans, and pushes records reachable from `HEAD`.
 `--all` includes every local anchor, including other branches. `--no-scan`
 bypasses the pre-push secret gate for that invocation and should only be used
-after a human has reviewed the records outside an agent session.
+after a human has reviewed the records outside an agent session. `--report`
+prints finding coordinates and fingerprints—but never matched content—when a
+scan blocks.
 `transport-push` is the pre-push hook entrypoint, not normally a command a
 human invokes.
 
@@ -183,6 +185,26 @@ list; later blocks degrade to `HEAD` scope — records still push, scoped to
 the checked-out branch. And a custom namespace's hook only fires if its
 `cliName` is on PATH or `hookInvocation` was given; otherwise its owner
 syncs through the library.
+
+## Sync scan reports
+
+`annals sync` and the pre-push transport scan new records before sharing
+them. A finding blocks the records push (and, with `transport.strict`, the
+code push) but prints only aggregate counts and a safe handoff by default.
+It does not print fingerprints, event ids, coordinates, matched text, or
+surrounding context.
+
+A human or CI job can deliberately request the coordinate-only report:
+
+```sh
+annals sync origin --report
+```
+
+The report includes fingerprints and event/path coordinates for remediation,
+but never matched text or context. Coding agents should not request the report
+or inspect the flagged events; hand the concise message to a human working in
+a plain terminal. `--report` changes presentation only: findings still block
+the same push and produce the same nonzero exit status.
 
 ## Size policy
 

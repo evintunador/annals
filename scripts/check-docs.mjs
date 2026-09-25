@@ -95,7 +95,7 @@ for (const heading of ["## Install from source", "## Library quick start", "## C
   if (!readme.includes(heading)) failures.push(`README.md: missing ${heading}`);
 }
 
-for (const flag of ["--no-scan", "--all", "transport-push"]) {
+for (const flag of ["--no-scan", "--all", "--report", "transport-push"]) {
   if (!readme.includes(flag)) failures.push(`README.md: missing CLI documentation for ${flag}`);
 }
 

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { git, type RepoInfo } from "../git.js";
 import { openLedger, type Ledger } from "../ledger.js";
 import { absorbIncoming, ensureTransport } from "../transport.js";
+import { scanEvents } from "../redact/scan.js";
 import { appendEvents, readEvents, ScanBlockedError, sync, transportPush } from "../store.js";
 import { cleanupDir, cleanupRepo, draft, makeBareRepo, makeCommit, makeTempRepo } from "./helpers.js";
 
@@ -16,6 +17,20 @@ function hookPath(repo: Ledger): string {
 async function remoteHasNotesRef(repo: Ledger): Promise<boolean> {
   const out = await git(["ls-remote", "origin", "refs/notes/annals"], { cwd: repo.root, allowFailure: true });
   return out.trim().length > 0;
+}
+
+async function captureStderr<T>(run: () => Promise<T>): Promise<{ result: T; output: string }> {
+  const originalWrite = process.stderr.write;
+  let output = "";
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    output += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    return { result: await run(), output };
+  } finally {
+    process.stderr.write = originalWrite;
+  }
 }
 
 test("ensureTransport: installs the pre-push hook and origin fetch refspec, idempotently", async () => {
@@ -160,13 +175,29 @@ test("transportPush: pushes clean events; scan findings hold back only the ledge
     const shaAfterClean = (await git(["ls-remote", "origin", "refs/notes/annals"], { cwd: repo.root })).trim();
 
     // keyword-assignment is a scan-tier rule: captured intact, flagged at push.
-    await appendEvents(repo, [
-      draft({ content: { text: 'export password = "hunter2hunter2hunter2"' } }),
-    ]);
-    const held = await transportPush(repo, "origin");
+    const secret = ["hunter2", "hunter2", "hunter2"].join("");
+    await appendEvents(repo, [draft({ content: { text: `export password = "${secret}"` } })]);
+    const [finding] = scanEvents(await readEvents(repo), "standard");
+    assert.ok(finding);
+    const { result: held, output } = await captureStderr(() => transportPush(repo, "origin"));
     assert.deepStrictEqual(held, { pushed: false, held: true });
+    assert.match(output, /distinct potential secret/);
+    assert.match(output, /sync origin --report/);
+    assert.ok(!output.includes(finding.fingerprint), "pre-push must omit fingerprints by default");
+    assert.ok(!output.includes(finding.eventId.slice(0, 16)), "pre-push must omit event ids by default");
+    for (let i = 0; i + 6 <= secret.length; i++) {
+      assert.ok(!output.includes(secret.slice(i, i + 6)), "pre-push output must not leak content");
+    }
     const shaAfterHeld = (await git(["ls-remote", "origin", "refs/notes/annals"], { cwd: repo.root })).trim();
     assert.strictEqual(shaAfterHeld, shaAfterClean, "finding must keep the remote ref untouched");
+
+    const detailed = await captureStderr(() =>
+      transportPush(repo, "origin", undefined, { reportFindings: true }),
+    );
+    assert.deepStrictEqual(detailed.result, { pushed: false, held: true });
+    assert.ok(detailed.output.includes(`[${finding.fingerprint}]`));
+    assert.ok(detailed.output.includes(finding.eventId.slice(0, 16)));
+    assert.ok(!detailed.output.includes(secret), "opt-in transport report must not leak content");
 
     await writeFile(join(repo.root, ".annals.json"), JSON.stringify({ transport: { strict: true } }));
     await assert.rejects(transportPush(repo, "origin"), ScanBlockedError);

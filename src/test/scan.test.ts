@@ -14,7 +14,7 @@ import {
   renderFinding,
   scanEvents,
 } from "../redact/scan.js";
-import { appendEvents, readEvents, sync } from "../store.js";
+import { appendEvents, readEvents, ScanBlockedError, sync } from "../store.js";
 import {
   cleanupDir,
   cleanupRepo,
@@ -24,6 +24,21 @@ import {
   makeCommit,
   makeTempRepo,
 } from "./helpers.js";
+
+async function captureStderr(run: () => Promise<void>): Promise<string> {
+  const originalWrite = process.stderr.write;
+  let output = "";
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    output += String(chunk);
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    await run();
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+  return output;
+}
 
 test("scanEvents: standard tier finds a keyword-anchored secret in both content and raw.data; the report carries coordinates, never content", () => {
   const secret = "supersecret123456";
@@ -281,21 +296,73 @@ test("groupFindings/formatGroupedReport: one block per distinct span, coordinate
   }
 });
 
-test("sync gate: a secret blocks push, nothing reaches the remote, and the report names the fingerprint", async () => {
+test("sync gate: default output is a concise count and safe pointer, with no coordinates or content", async () => {
   const remote = await makeBareRepo();
   const repo = await makeTempRepo();
   try {
     await makeCommit(repo, "init");
     await git(["remote", "add", "origin", remote], { cwd: repo.root });
-    await appendEvents(repo, [draft({ content: { text: "password=supersecret123" } })]);
+    const secret = ["zxQ7vN4", "wR8tY1zC"].join("");
+    await appendEvents(repo, [draft({ content: { text: `password=${secret}` } })]);
+    const [finding] = scanEvents(await readEvents(repo), "standard");
+    assert.ok(finding);
 
-    await assert.rejects(() => sync(repo, "origin", "push"), /push blocked/);
+    const output = await captureStderr(async () => {
+      await assert.rejects(
+        () => sync(repo, "origin", "push"),
+        (err: unknown) => err instanceof ScanBlockedError && err.findings > 0,
+      );
+    });
+    assert.match(output, /1 distinct potential secret/);
+    assert.match(output, /annals sync origin --report/);
+    assert.match(output, /If you are a HUMAN/);
+    assert.match(output, /If you are an AGENT/);
+    assert.ok(!output.includes(finding.fingerprint), "default output must omit fingerprints");
+    assert.ok(!output.includes(finding.eventId.slice(0, 16)), "default output must omit event ids");
+    assert.ok(!output.includes(`${finding.path}@${finding.start}`), "default output must omit coordinates");
+    for (let i = 0; i + 6 <= secret.length; i++) {
+      assert.ok(!output.includes(secret.slice(i, i + 6)), "default output must not leak content");
+    }
 
     // Nothing was pushed: the remote must still have no notes ref at all.
     const remoteRef = (
       await git(["ls-remote", remote, "refs/notes/annals"], { cwd: repo.root })
     ).trim();
     assert.strictEqual(remoteRef, "", "the remote must not have received the ledger ref");
+  } finally {
+    await cleanupRepo(repo);
+    await cleanupDir(remote);
+  }
+});
+
+test("sync gate: reportFindings opts into the coordinate-only report and still blocks", async () => {
+  const remote = await makeBareRepo();
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "init");
+    await git(["remote", "add", "origin", remote], { cwd: repo.root });
+    const secret = ["kM9pL2", "xV6dF0sH"].join("");
+    await appendEvents(repo, [draft({ content: { text: `password=${secret}` } })]);
+    const [finding] = scanEvents(await readEvents(repo), "standard");
+    assert.ok(finding);
+
+    const output = await captureStderr(async () => {
+      await assert.rejects(
+        () => sync(repo, "origin", "push", { reportFindings: true }),
+        ScanBlockedError,
+      );
+    });
+    assert.ok(output.includes(`[${finding.fingerprint}]`));
+    assert.ok(output.includes(finding.eventId.slice(0, 16)));
+    assert.ok(output.includes(`${finding.path}@${finding.start}`));
+    for (let i = 0; i + 6 <= secret.length; i++) {
+      assert.ok(!output.includes(secret.slice(i, i + 6)), "detailed report must not leak content");
+    }
+
+    const remoteRef = (
+      await git(["ls-remote", remote, "refs/notes/annals"], { cwd: repo.root })
+    ).trim();
+    assert.strictEqual(remoteRef, "", "reporting must not weaken the scan gate");
   } finally {
     await cleanupRepo(repo);
     await cleanupDir(remote);

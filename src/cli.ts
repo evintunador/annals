@@ -24,7 +24,7 @@ async function requireLedger() {
   return openLedger(repo);
 }
 
-async function cmdTransportPush(positional: string[]): Promise<void> {
+async function cmdTransportPush(positional: string[], flags: Set<string>): Promise<void> {
   const repo = await findRepo(process.cwd());
   if (!repo) return; // a hook must never fail the user's push
   const ledger = openLedger(repo);
@@ -41,7 +41,7 @@ async function cmdTransportPush(positional: string[]): Promise<void> {
     }
   }
   try {
-    await transportPush(ledger, remote, revs);
+    await transportPush(ledger, remote, revs, { reportFindings: flags.has("report") });
   } catch (err) {
     if (err instanceof ScanBlockedError) {
       // transport.strict: nonzero exit makes git abort the entire push.
@@ -61,6 +61,7 @@ async function cmdSync(positional: string[], flags: Set<string>): Promise<void> 
   const remote = positional[0] || "origin";
   const result = await sync(ledger, remote, "both", {
     skipScan: flags.has("no-scan"),
+    reportFindings: flags.has("report"),
     ...(flags.has("all") ? { scope: null } : {}),
   });
   const pushed =
@@ -79,14 +80,15 @@ async function main(): Promise<void> {
   const command = positional.shift();
   switch (command) {
     case "transport-push":
-      return cmdTransportPush(positional);
+      return cmdTransportPush(positional, flags);
     case "sync":
       return cmdSync(positional, flags);
     default:
       process.stderr.write(
         "usage:\n" +
-          "  annals sync [remote] [--no-scan] [--all]   fetch+push the annals notes ref\n" +
-          "  annals transport-push [remote]             pre-push hook entrypoint\n",
+          "  annals sync [remote] [--no-scan] [--all] [--report]  fetch+push the annals notes ref\n" +
+          "  annals transport-push [remote] [--report]           pre-push hook entrypoint\n" +
+          "\n--report prints finding coordinates and fingerprints, never matched content.\n",
       );
       process.exit(command === undefined || command === "help" ? 0 : 2);
   }

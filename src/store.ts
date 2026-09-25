@@ -39,9 +39,10 @@ import {
 } from "./reanchor.js";
 import { collectMatches, redactDraft, type ExtraValueGroup, type RedactionRecord } from "./redact/apply.js";
 import { captureRules, collectEnvValues, loadConfig, type AnnalsConfig } from "./redact/config.js";
-import { addKnownSecrets, loadKnownSecrets } from "./redact/known-secrets.js";
+import { knownSecretCount, loadKnownSecrets, rememberKnownSecrets } from "./redact/known-secrets.js";
 import { RULESET_VERSION, type RedactionRule } from "./redact/rules.js";
 import {
+  conciseFindingGuidance,
   filterFindings,
   findingGuidance,
   formatGroupedReport,
@@ -173,10 +174,11 @@ export async function appendEvents(
   // audit trail. Only consulted when capture redaction is active at all
   // (rules.length > 0); known-secrets additionally requires its opt-in flag.
   const extraValues: ExtraValueGroup[] = [];
+  let knownSecrets: Awaited<ReturnType<typeof loadKnownSecrets>> | undefined;
   if (rules.length > 0) {
     if (config.redact?.knownSecrets === true) {
       const known = await loadKnownSecrets(repo);
-      if (known.length > 0) extraValues.push({ ruleId: "known-secret", values: known });
+      if (knownSecretCount(known) > 0) knownSecrets = known;
     }
     if (config.redact?.env === true) {
       const env = await collectEnvValues(repo.root);
@@ -189,6 +191,7 @@ export async function appendEvents(
     const { draft: redacted, records } = redactDraft(withContext, {
       rules,
       ...(extraValues.length > 0 ? { extraValues } : {}),
+      ...(knownSecrets ? { knownSecrets } : {}),
     });
     return finalizeEvent(records.length > 0 ? { ...redacted, redactions: records } : redacted);
   });
@@ -774,7 +777,7 @@ async function remoteNoteIds(repo: Ledger, remote: string): Promise<Set<string> 
 /** Thrown when the layer-E scan gate blocks a push; carries no secrets. */
 export class ScanBlockedError extends Error {
   constructor(public readonly findings: number, cliName = "annals") {
-    super(`${cliName} sync: push blocked — ${findings} potential secret(s) found (see report above)`);
+    super(`${cliName} sync: push blocked — ${findings} potential secret match(es) found`);
   }
 }
 
@@ -836,6 +839,7 @@ async function runScanGate(
   tier: "standard" | "paranoid",
   anchors: string[] | null,
   config?: AnnalsConfig,
+  reportFindings = false,
 ): Promise<void> {
   const remoteIds = await remoteNoteIds(repo, remote);
 
@@ -865,13 +869,25 @@ async function runScanGate(
     `${repo.ns.cliName} sync: blocked — ${spans} distinct potential secret(s) ` +
       `(${findings.length} match site(s) across ${eventIds.length} event(s)) not yet on ${remote}\n\n`,
   );
-  process.stderr.write(`${formatGroupedReport(findings)}\n`);
-  process.stderr.write(`\n${findingGuidance(repo.ns.cliName, eventIds)}\n`);
-  process.stderr.write(
-    "\nUse the owning producer's documented workflow to review and remediate the finding, " +
-      "then retry this sync. A caller may explicitly bypass the gate with skipScan/--no-scan.\n",
-  );
+  if (reportFindings) {
+    process.stderr.write(`${formatGroupedReport(findings)}\n`);
+    process.stderr.write(`\n${findingGuidance(repo.ns.cliName, eventIds)}\n`);
+    process.stderr.write(
+      "\nUse the owning producer's documented workflow to review and remediate the finding, " +
+        "then retry this sync. A caller may explicitly bypass the gate with skipScan/--no-scan.\n",
+    );
+  } else {
+    process.stderr.write(`${conciseFindingGuidance(repo.ns.cliName, remote)}\n`);
+  }
   throw new ScanBlockedError(findings.length, repo.ns.cliName);
+}
+
+export interface SyncOptions {
+  skipScan?: boolean;
+  paranoid?: boolean;
+  scope?: string | string[] | null;
+  /** Print the coordinate-only finding report when the scan gate blocks. */
+  reportFindings?: boolean;
 }
 
 /**
@@ -884,7 +900,7 @@ export async function sync(
   repo: Ledger,
   remote = "origin",
   mode: "both" | "push" | "fetch" = "both",
-  opts: { skipScan?: boolean; paranoid?: boolean; scope?: string | string[] | null } = {},
+  opts: SyncOptions = {},
 ): Promise<SyncResult> {
   const result: SyncResult = { fetched: false, pushed: false, scopedAnchors: null };
   await ensureMergeConfig(repo);
@@ -908,7 +924,7 @@ export async function sync(
     if (!scanDisabled) {
       const tier: "standard" | "paranoid" =
         opts.paranoid === true || config.scan?.tier === "paranoid" ? "paranoid" : "standard";
-      await runScanGate(repo, remote, tier, anchors, config);
+      await runScanGate(repo, remote, tier, anchors, config, opts.reportFindings === true);
     }
     // The pushed child git inherits the internal guard env var, telling the
     // pre-push transport hook this push *is* the notes push — no recursion.
@@ -935,6 +951,11 @@ export interface TransportPushResult {
   pushed: boolean;
   /** True when scan findings held the ledger back (non-strict mode). */
   held: boolean;
+}
+
+export interface TransportPushOptions {
+  /** Print the coordinate-only finding report when the scan gate blocks. */
+  reportFindings?: boolean;
 }
 
 /**
@@ -980,6 +1001,7 @@ export async function transportPush(
   repo: Ledger,
   remote: string,
   revs?: string[],
+  opts: TransportPushOptions = {},
 ): Promise<TransportPushResult> {
   // Recursion breaker. The pre-push hook already checks this guard, but the
   // hook text on disk can predate a guard rename (hooks only self-upgrade on
@@ -998,15 +1020,17 @@ export async function transportPush(
   try {
     // No usable refs (deletes only, or an old hook that ate stdin): fall back
     // to the checked-out branch rather than to the whole ledger.
-    await sync(repo, remote, "push", { scope: revs && revs.length > 0 ? revs : ["HEAD"] });
+    await sync(repo, remote, "push", {
+      scope: revs && revs.length > 0 ? revs : ["HEAD"],
+      ...(opts.reportFindings === true ? { reportFindings: true } : {}),
+    });
     return { pushed: true, held: false };
   } catch (err) {
     if (err instanceof ScanBlockedError) {
       if (config.transport?.strict === true) throw err;
       process.stderr.write(
-        `${repo.ns.cliName}: records were held back from this push (potential secrets — ` +
-          "see report above); your code push continues. Use the owning producer's review " +
-          "workflow, then retry the push.\n",
+        `${repo.ns.cliName}: records were held back from this push (potential secrets); ` +
+          "your code push continues. Follow the review guidance above, then retry the push.\n",
       );
       return { pushed: false, held: true };
     }
@@ -1271,13 +1295,11 @@ export async function redactEvent(
   });
 
   // Persist remembered secret values outside the notes lock (the store is its
-  // own file under .git/, unrelated to the notes ref). addKnownSecrets applies
-  // the min-length filter and dedups, returning how many were newly stored.
+  // own file under .git/, unrelated to the notes ref). rememberKnownSecrets
+  // applies the min-length filter and digest dedup and returns the added count.
   let knownSecretsRemembered = 0;
   if (rememberSecrets && secretValues.length > 0) {
-    const before = (await loadKnownSecrets(repo)).length;
-    await addKnownSecrets(repo, secretValues);
-    knownSecretsRemembered = (await loadKnownSecrets(repo)).length - before;
+    knownSecretsRemembered = await rememberKnownSecrets(repo, secretValues);
   }
 
   // Companion event: goes through the normal appendEvents path (its own

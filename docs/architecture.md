@@ -118,9 +118,10 @@ producer information are not secret-bearing fields by contract. A reasoning
 record's `encrypted_content` leaf is exempt because modifying ciphertext would
 silently corrupt provider replay.
 
-The sync report contains coordinates and fingerprints, never excerpts. Human
-review belongs in a plain terminal because showing the suspicious span inside
-a captured agent conversation would create another copy of it.
+The default sync failure suppresses finding details. An explicitly requested
+report contains coordinates and fingerprints, never excerpts. Human review
+belongs in a plain terminal because showing the suspicious span inside a
+captured agent conversation would create another copy of it.
 
 ## Size policy
 
