@@ -1,9 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmod, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { addKnownSecrets, loadKnownSecrets } from "../redact/known-secrets.js";
+import {
+  addKnownSecrets,
+  knownSecretCount,
+  loadKnownSecrets,
+  matchingKnownSecrets,
+  rememberKnownSecrets,
+} from "../redact/known-secrets.js";
 import { appendEvents, redactEvent } from "../store.js";
 import { cleanupRepo, draft, makeCommit, makeTempRepo } from "./helpers.js";
 
@@ -15,26 +21,157 @@ async function enableKnownSecrets(repoRoot: string): Promise<void> {
   await writeFile(join(repoRoot, ".annals.json"), JSON.stringify({ redact: { knownSecrets: true } }));
 }
 
-test("loadKnownSecrets/addKnownSecrets: dedups, sorts, drops sub-8-char values, no file until something sticks", async () => {
+test("known secrets are salted digests: additive, deduped, and never plaintext", async () => {
   const repo = await makeTempRepo();
   try {
-    assert.deepStrictEqual(await loadKnownSecrets(repo), []);
+    assert.strictEqual(knownSecretCount(await loadKnownSecrets(repo)), 0);
 
     // "short" (5 chars) is below the min-length floor and must be dropped;
     // an all-too-short batch must not even create the file.
     await addKnownSecrets(repo, ["short", "tiny"]);
     assert.ok(!existsSync(knownSecretsPath(repo.gitDir)), "no value stuck -> no store file");
 
-    await addKnownSecrets(repo, ["longenoughvalue", "short", "anothergoodone"]);
-    assert.deepStrictEqual(await loadKnownSecrets(repo), ["anothergoodone", "longenoughvalue"]);
-
-    // Additive + idempotent: re-adding an existing value and a new one merges.
-    await addKnownSecrets(repo, ["longenoughvalue", "thirdgoodvalue"]);
-    assert.deepStrictEqual(await loadKnownSecrets(repo), [
+    assert.strictEqual(
+      await rememberKnownSecrets(repo, ["longenoughvalue", "short", "anothergoodone"]),
+      2,
+    );
+    const first = await loadKnownSecrets(repo);
+    assert.strictEqual(knownSecretCount(first), 2);
+    assert.deepStrictEqual(matchingKnownSecrets("x anothergoodone y longenoughvalue", first).sort(), [
       "anothergoodone",
       "longenoughvalue",
-      "thirdgoodvalue",
     ]);
+    const raw = await readFile(knownSecretsPath(repo.gitDir), "utf8");
+    assert.ok(!raw.includes("anothergoodone"));
+    assert.ok(!raw.includes("longenoughvalue"));
+    assert.strictEqual((JSON.parse(raw) as { version: number }).version, 2);
+
+    // Additive + idempotent: re-adding an existing value and a new one merges.
+    assert.strictEqual(await rememberKnownSecrets(repo, ["longenoughvalue", "thirdgoodvalue"]), 1);
+    const second = await loadKnownSecrets(repo);
+    assert.strictEqual(knownSecretCount(second), 3);
+    assert.deepStrictEqual(matchingKnownSecrets("thirdgoodvalue", second), ["thirdgoodvalue"]);
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("a legacy plaintext store protects reads and migrates on the next write", async () => {
+  const repo = await makeTempRepo();
+  try {
+    const path = knownSecretsPath(repo.gitDir);
+    await mkdir(join(repo.gitDir, "annals"), { recursive: true });
+    await writeFile(path, JSON.stringify({ values: ["LEGACY_TESTONLY_value"] }));
+    const legacy = await loadKnownSecrets(repo);
+    assert.deepStrictEqual(matchingKnownSecrets("has LEGACY_TESTONLY_value here", legacy), [
+      "LEGACY_TESTONLY_value",
+    ]);
+
+    assert.strictEqual(await rememberKnownSecrets(repo, ["LEGACY_TESTONLY_value"]), 0);
+    const raw = await readFile(path, "utf8");
+    assert.ok(!raw.includes("LEGACY_TESTONLY_value"));
+    assert.strictEqual((JSON.parse(raw) as { version: number }).version, 2);
+    assert.deepStrictEqual(
+      matchingKnownSecrets("has LEGACY_TESTONLY_value here", await loadKnownSecrets(repo)),
+      ["LEGACY_TESTONLY_value"],
+    );
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("migration removes legacy plaintext that is now below the remember floor", async () => {
+  const repo = await makeTempRepo();
+  try {
+    const path = knownSecretsPath(repo.gitDir);
+    await mkdir(join(repo.gitDir, "annals"), { recursive: true });
+    await writeFile(path, JSON.stringify({ values: ["short"] }));
+    assert.strictEqual(await rememberKnownSecrets(repo, []), 0);
+    const raw = await readFile(path, "utf8");
+    assert.ok(!raw.includes("short"));
+    assert.strictEqual((JSON.parse(raw) as { version: number }).version, 2);
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("digest matching preserves Unicode by hashing UTF-16 code units losslessly", async () => {
+  const repo = await makeTempRepo();
+  try {
+    const value = "DUMMY-🔐-secret";
+    await addKnownSecrets(repo, [value]);
+    assert.deepStrictEqual(matchingKnownSecrets(`before ${value} after`, await loadKnownSecrets(repo)), [
+      value,
+    ]);
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("digest matching preserves an unpaired surrogate exactly", async () => {
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "init");
+    await enableKnownSecrets(repo.root);
+    const value = "DUMMY77\ud800";
+    await addKnownSecrets(repo, [value]);
+    assert.deepStrictEqual(matchingKnownSecrets(`before ${value} after`, await loadKnownSecrets(repo)), [
+      value,
+    ]);
+    const result = await appendEvents(repo, [draft({ content: { text: value } })]);
+    assert.ok(!(result.appended[0]!.content as { text: string }).text.includes(value));
+    assert.strictEqual(result.appended[0]!.redactions?.length, 1);
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("concurrent additions serialize without losing remembered digests", async () => {
+  const repo = await makeTempRepo();
+  try {
+    const values = Array.from({ length: 32 }, (_, i) => `DUMMY-concurrent-${i.toString().padStart(2, "0")}`);
+    await Promise.all(values.map((value) => addKnownSecrets(repo, [value])));
+    const known = await loadKnownSecrets(repo);
+    assert.strictEqual(knownSecretCount(known), values.length);
+    assert.deepStrictEqual(matchingKnownSecrets(values.join(" "), known).sort(), values.sort());
+  } finally {
+    await cleanupRepo(repo);
+  }
+});
+
+test("a corrupt store warns that protection is inactive without leaking bytes", async () => {
+  const repo = await makeTempRepo();
+  const originalWrite = process.stderr.write;
+  let warning = "";
+  try {
+    const path = knownSecretsPath(repo.gitDir);
+    await mkdir(join(repo.gitDir, "annals"), { recursive: true });
+    await writeFile(path, "{DUMMY malformed");
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      warning += String(chunk);
+      return true;
+    }) as typeof process.stderr.write;
+    assert.strictEqual(knownSecretCount(await loadKnownSecrets(repo)), 0);
+    assert.match(warning, /protection is inactive/);
+    assert.ok(!warning.includes("malformed"));
+  } finally {
+    process.stderr.write = originalWrite;
+    await cleanupRepo(repo);
+  }
+});
+
+test("hashed known secrets preserve longest-first replacement for overlaps", async () => {
+  const repo = await makeTempRepo();
+  try {
+    await makeCommit(repo, "init");
+    await enableKnownSecrets(repo.root);
+    const shorter = "DUMMY-overlap";
+    const longer = `${shorter}-extended`;
+    await addKnownSecrets(repo, [shorter, longer]);
+    const result = await appendEvents(repo, [draft({ content: { text: longer } })]);
+    const text = (result.appended[0]!.content as { text: string }).text;
+    assert.ok(!text.includes(shorter));
+    assert.strictEqual(result.appended[0]!.redactions?.length, 1);
   } finally {
     await cleanupRepo(repo);
   }
@@ -60,7 +197,7 @@ test("redact --pattern (opt-in on): remembers the scrubbed value, then capture-t
     // 2. Human confirms it's a real secret via --pattern; it gets remembered.
     const result = await redactEvent(repo, original.id.slice(4, 12), { pattern: secret });
     assert.strictEqual(result.knownSecretsRemembered, 1);
-    assert.deepStrictEqual(await loadKnownSecrets(repo), [secret]);
+    assert.strictEqual(knownSecretCount(await loadKnownSecrets(repo)), 1);
 
     // 3. A *new* event (distinct text so its id differs) mentioning the same
     //    value is now scrubbed automatically at capture time.
@@ -157,15 +294,14 @@ test("known-secrets store is written owner-read/write only (0600), and bad perms
   }
 });
 
-test("known-secrets store lives under .git/, which git never tracks", async () => {
+test("known-secrets store lives under .git/ and contains no plaintext", async () => {
   const repo = await makeTempRepo();
   try {
     await addKnownSecrets(repo, ["longenoughvalue"]);
     const path = knownSecretsPath(repo.gitDir);
     assert.ok(existsSync(path));
     assert.ok(path.includes(`${repo.gitDir}/annals/`), "store sits beside the allowlist under .git/");
-    // Plaintext is expected here — this is the local, unshared store.
-    assert.ok((await readFile(path, "utf8")).includes("longenoughvalue"));
+    assert.ok(!(await readFile(path, "utf8")).includes("longenoughvalue"));
   } finally {
     await cleanupRepo(repo);
   }

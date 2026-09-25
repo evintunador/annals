@@ -1,5 +1,6 @@
 import { sha256Hex } from "../canonical.js";
 import type { EventDraft } from "../schema.js";
+import { matchingKnownSecrets, type KnownSecrets } from "./known-secrets.js";
 import { RULESET_VERSION, type RedactionRule } from "./rules.js";
 
 export interface RedactionRecord {
@@ -142,7 +143,7 @@ export function walkStrings(
  */
 export function redactDraft(
   draft: EventDraft,
-  opts: { rules: RedactionRule[]; extraValues?: ExtraValueGroup[] },
+  opts: { rules: RedactionRule[]; extraValues?: ExtraValueGroup[]; knownSecrets?: KnownSecrets },
 ): { draft: EventDraft; records: RedactionRecord[] } {
   const records: RedactionRecord[] = [];
   // Sort each group's values longest-first so a longer secret is scrubbed
@@ -154,6 +155,15 @@ export function redactDraft(
   function redactString(value: string, path: string): string {
     if (isExemptFromRedaction(draft.kind, path)) return value;
     let scrubbed = value;
+    if (opts.knownSecrets) {
+      scrubbed = redactExtraValues(
+        scrubbed,
+        matchingKnownSecrets(scrubbed, opts.knownSecrets).sort((a, b) => b.length - a.length),
+        "known-secret",
+        path,
+        records,
+      );
+    }
     for (const g of groups) scrubbed = redactExtraValues(scrubbed, g.values, g.ruleId, path, records);
     const { text, matches } = redactText(scrubbed, opts.rules);
     for (const m of matches) {
