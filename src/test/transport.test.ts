@@ -14,8 +14,8 @@ function hookPath(repo: Ledger): string {
   return join(repo.gitDir, "hooks", "pre-push");
 }
 
-async function remoteHasNotesRef(repo: Ledger): Promise<boolean> {
-  const out = await git(["ls-remote", "origin", "refs/notes/annals"], { cwd: repo.root, allowFailure: true });
+async function remoteHasNotesRef(repo: Ledger, remote = "origin"): Promise<boolean> {
+  const out = await git(["ls-remote", remote, "refs/notes/annals"], { cwd: repo.root, allowFailure: true });
   return out.trim().length > 0;
 }
 
@@ -165,42 +165,52 @@ test("transportPush: pushes clean events; scan findings hold back only the ledge
   const remote = await makeBareRepo();
   const repo = await makeTempRepo("cledger-tpush-");
   try {
-    await git(["remote", "add", "origin", remote], { cwd: repo.root });
+    await git(["remote", "add", "backup", remote], { cwd: repo.root });
     await makeCommit(repo, "init");
+    const pushedRev = (await git(["rev-parse", "HEAD"], { cwd: repo.root })).trim();
 
     await appendEvents(repo, [draft({ content: { text: "clean event" } })]);
-    const clean = await transportPush(repo, "origin");
+    const clean = await transportPush(repo, "backup", [pushedRev]);
     assert.deepStrictEqual(clean, { pushed: true, held: false });
-    assert.strictEqual(await remoteHasNotesRef(repo), true);
-    const shaAfterClean = (await git(["ls-remote", "origin", "refs/notes/annals"], { cwd: repo.root })).trim();
+    assert.strictEqual(await remoteHasNotesRef(repo, "backup"), true);
+    const shaAfterClean = (await git(["ls-remote", "backup", "refs/notes/annals"], { cwd: repo.root })).trim();
 
     // keyword-assignment is a scan-tier rule: captured intact, flagged at push.
     const secret = ["hunter2", "hunter2", "hunter2"].join("");
     await appendEvents(repo, [draft({ content: { text: `export password = "${secret}"` } })]);
     const [finding] = scanEvents(await readEvents(repo), "standard");
     assert.ok(finding);
-    const { result: held, output } = await captureStderr(() => transportPush(repo, "origin"));
+    const { result: held, output } = await captureStderr(() =>
+      transportPush(repo, "backup", [pushedRev]),
+    );
     assert.deepStrictEqual(held, { pushed: false, held: true });
     assert.match(output, /distinct potential secret/);
-    assert.match(output, /sync origin --report/);
+    assert.match(output, /pre-push scan: blocked/);
+    assert.match(output, /uses the exact refs Git/);
+    assert.ok(!output.includes("--report"), "pre-push guidance must not request a differently scoped report");
+    assert.ok(!output.includes("sync backup"), "pre-push guidance must not synthesize remote syntax");
+    assert.ok(!output.includes("same sync command"), "a git-push trigger is not a sync command");
     assert.ok(!output.includes(finding.fingerprint), "pre-push must omit fingerprints by default");
     assert.ok(!output.includes(finding.eventId.slice(0, 16)), "pre-push must omit event ids by default");
     for (let i = 0; i + 6 <= secret.length; i++) {
       assert.ok(!output.includes(secret.slice(i, i + 6)), "pre-push output must not leak content");
     }
-    const shaAfterHeld = (await git(["ls-remote", "origin", "refs/notes/annals"], { cwd: repo.root })).trim();
+    const shaAfterHeld = (await git(["ls-remote", "backup", "refs/notes/annals"], { cwd: repo.root })).trim();
     assert.strictEqual(shaAfterHeld, shaAfterClean, "finding must keep the remote ref untouched");
 
     const detailed = await captureStderr(() =>
-      transportPush(repo, "origin", undefined, { reportFindings: true }),
+      transportPush(repo, "backup", [pushedRev], { reportFindings: true }),
     );
     assert.deepStrictEqual(detailed.result, { pushed: false, held: true });
     assert.ok(detailed.output.includes(`[${finding.fingerprint}]`));
     assert.ok(detailed.output.includes(finding.eventId.slice(0, 16)));
     assert.ok(!detailed.output.includes(secret), "opt-in transport report must not leak content");
+    assert.match(detailed.output, /retry the same git push/);
+    assert.ok(!detailed.output.includes("--report"), "an opt-in report must not ask for itself again");
+    assert.ok(!detailed.output.includes("sync backup"), "detailed output must not lose pushed-ref scope");
 
     await writeFile(join(repo.root, ".annals.json"), JSON.stringify({ transport: { strict: true } }));
-    await assert.rejects(transportPush(repo, "origin"), ScanBlockedError);
+    await assert.rejects(transportPush(repo, "backup", [pushedRev]), ScanBlockedError);
   } finally {
     await cleanupRepo(repo);
     await cleanupDir(remote);

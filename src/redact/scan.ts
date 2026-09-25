@@ -291,28 +291,45 @@ export function findingGuidance(cliName: string, eventIds: string[]): string {
  * The default scan path prints only this pointer, which gives a human a safe
  * next command without giving an agent anything tempting to inspect.
  */
-export function conciseFindingGuidance(cliName: string, remote: string): string {
-  const human =
-    cliName === "annals"
-      ? [
-          "  If you are a HUMAN: rerun in a plain terminal, outside any agent:",
-          `      annals sync ${remote} --report`,
-        ]
-      : [
-          "  If you are a HUMAN: use the owning producer's documented workflow",
-          "  to rerun the sync with its finding report enabled, in a plain terminal",
-          "  outside any agent.",
-        ];
+// The unused remote remains optional for source compatibility with callers of
+// the first public version. Interpolating it cannot reconstruct the caller's
+// mode, scope, or tier flags, and downstream CLIs need not use annals' own
+// argument syntax, so the only accurate instruction is to amend the same
+// command the human already ran.
+export function conciseFindingGuidance(cliName: string, _remote?: string): string {
+  void cliName;
   return [
     "  Finding details were suppressed.",
     "",
-    ...human,
+    "  If you are a HUMAN: rerun this same sync command in a plain terminal,",
+    "  outside any agent, adding --report.",
     "  The report contains coordinates and fingerprints, never matched text",
     "  or surrounding context.",
     "",
     "  If you are an AGENT: stop here and hand this to the human. Do not enable",
     "  the report or run the producer review workflow, inspect, export, or read the",
     "  flagged content — it would be captured into this conversation.",
+  ].join("\n");
+}
+
+/**
+ * A pre-push hook is scoped by Git's stdin, not by a command we can safely
+ * reconstruct for the human. Point at the workflow rather than inventing a
+ * sync invocation that may target a different remote or set of commits.
+ */
+export function conciseTransportFindingGuidance(): string {
+  return [
+    "  Finding details were suppressed.",
+    "",
+    "  If you are a HUMAN: review and remediate in a plain terminal, outside",
+    "  any agent, using the calling application's documented review workflow;",
+    "  then retry the same git push. This scan uses the exact refs Git supplies",
+    "  (falling back to HEAD only when it supplies none), so no potentially-",
+    "  different sync command is suggested here.",
+    "",
+    "  If you are an AGENT: stop here and hand this to the human. Do not inspect,",
+    "  export, or otherwise read the flagged content — it would be captured into",
+    "  this conversation.",
   ].join("\n");
 }
 

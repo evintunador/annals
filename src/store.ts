@@ -43,6 +43,7 @@ import { knownSecretCount, loadKnownSecrets, rememberKnownSecrets } from "./reda
 import { RULESET_VERSION, type RedactionRule } from "./redact/rules.js";
 import {
   conciseFindingGuidance,
+  conciseTransportFindingGuidance,
   filterFindings,
   findingGuidance,
   formatGroupedReport,
@@ -840,6 +841,7 @@ async function runScanGate(
   anchors: string[] | null,
   config?: AnnalsConfig,
   reportFindings = false,
+  invocation: "sync" | "transport" = "sync",
 ): Promise<void> {
   const remoteIds = await remoteNoteIds(repo, remote);
 
@@ -866,18 +868,26 @@ async function runScanGate(
   const eventIds = [...new Set(findings.map((f) => f.eventId))];
   const spans = new Set(findings.map((f) => f.fingerprint)).size;
   process.stderr.write(
-    `${repo.ns.cliName} sync: blocked — ${spans} distinct potential secret(s) ` +
+    `${repo.ns.cliName} ${invocation === "transport" ? "pre-push scan" : "sync"}: blocked — ` +
+      `${spans} distinct potential secret(s) ` +
       `(${findings.length} match site(s) across ${eventIds.length} event(s)) not yet on ${remote}\n\n`,
   );
   if (reportFindings) {
     process.stderr.write(`${formatGroupedReport(findings)}\n`);
     process.stderr.write(`\n${findingGuidance(repo.ns.cliName, eventIds)}\n`);
     process.stderr.write(
-      "\nUse the owning producer's documented workflow to review and remediate the finding, " +
-        "then retry this sync. A caller may explicitly bypass the gate with skipScan/--no-scan.\n",
+      invocation === "transport"
+        ? "\nUse the owning producer's documented workflow to review and remediate the finding, " +
+            "then retry the same git push.\n"
+        : "\nUse the owning producer's documented workflow to review and remediate the finding, " +
+            "then retry this sync. A caller may explicitly bypass the gate with skipScan/--no-scan.\n",
     );
   } else {
-    process.stderr.write(`${conciseFindingGuidance(repo.ns.cliName, remote)}\n`);
+    process.stderr.write(
+      `${invocation === "transport"
+        ? conciseTransportFindingGuidance()
+        : conciseFindingGuidance(repo.ns.cliName, remote)}\n`,
+    );
   }
   throw new ScanBlockedError(findings.length, repo.ns.cliName);
 }
@@ -888,6 +898,8 @@ export interface SyncOptions {
   scope?: string | string[] | null;
   /** Print the coordinate-only finding report when the scan gate blocks. */
   reportFindings?: boolean;
+  /** @internal Select pre-push wording when transportPush delegates here. */
+  scanInvocation?: "sync" | "transport";
 }
 
 /**
@@ -924,7 +936,15 @@ export async function sync(
     if (!scanDisabled) {
       const tier: "standard" | "paranoid" =
         opts.paranoid === true || config.scan?.tier === "paranoid" ? "paranoid" : "standard";
-      await runScanGate(repo, remote, tier, anchors, config, opts.reportFindings === true);
+      await runScanGate(
+        repo,
+        remote,
+        tier,
+        anchors,
+        config,
+        opts.reportFindings === true,
+        opts.scanInvocation ?? "sync",
+      );
     }
     // The pushed child git inherits the internal guard env var, telling the
     // pre-push transport hook this push *is* the notes push — no recursion.
@@ -1022,6 +1042,7 @@ export async function transportPush(
     // to the checked-out branch rather than to the whole ledger.
     await sync(repo, remote, "push", {
       scope: revs && revs.length > 0 ? revs : ["HEAD"],
+      scanInvocation: "transport",
       ...(opts.reportFindings === true ? { reportFindings: true } : {}),
     });
     return { pushed: true, held: false };
