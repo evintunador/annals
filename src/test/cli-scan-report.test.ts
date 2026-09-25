@@ -21,23 +21,25 @@ test("CLI sync --report deliberately expands a blocked scan without changing its
   const repo = await makeTempRepo();
   try {
     await makeCommit(repo, "init");
-    await git(["remote", "add", "origin", remote], { cwd: repo.root });
+    await git(["remote", "add", "backup", remote], { cwd: repo.root });
     const secret = ["qZ8mK2", "pL7vN4wR"].join("");
     await appendEvents(repo, [draft({ content: { text: `password=${secret}` } })]);
     const [finding] = scanEvents(await readEvents(repo), "standard");
     assert.ok(finding);
 
-    const concise = spawnSync(process.execPath, [CLI_PATH, "sync", "origin"], {
+    const concise = spawnSync(process.execPath, [CLI_PATH, "sync", "backup", "--all"], {
       cwd: repo.root,
       encoding: "utf8",
       env: process.env,
     });
     assert.strictEqual(concise.status, 1, "a blocked sync must exit nonzero");
-    assert.match(concise.stderr, /sync origin --report/);
+    assert.match(concise.stderr, /same sync command[\s\S]*adding --report/);
+    assert.ok(!concise.stderr.includes("sync origin"), "guidance must not substitute the default remote");
+    assert.ok(!concise.stderr.includes("sync backup --report"), "guidance must not drop the original --all scope");
     assert.ok(!concise.stderr.includes(finding.fingerprint));
     assert.ok(!concise.stderr.includes(finding.eventId.slice(0, 16)));
 
-    const detailed = spawnSync(process.execPath, [CLI_PATH, "sync", "origin", "--report"], {
+    const detailed = spawnSync(process.execPath, [CLI_PATH, "sync", "backup", "--all", "--report"], {
       cwd: repo.root,
       encoding: "utf8",
       env: process.env,

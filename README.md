@@ -192,9 +192,14 @@ syncs through the library.
 them. A finding blocks the records push (and, with `transport.strict`, the
 code push) but prints only aggregate counts and a safe handoff by default.
 It does not print fingerprints, event ids, coordinates, matched text, or
-surrounding context.
+surrounding context. Pre-push guidance also does not synthesize a manual sync
+command: Git supplies an exact pushed-ref scope on stdin, and reconstructing a
+command could silently scan a different set of records. Review in the calling
+application's human workflow, then retry the same git push.
 
-A human or CI job can deliberately request the coordinate-only report:
+A human or CI job can deliberately request the coordinate-only report by
+rerunning the same sync command with `--report`, preserving its remote and
+scope. For example:
 
 ```sh
 annals sync origin --report

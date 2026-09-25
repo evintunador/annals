@@ -314,7 +314,7 @@ test("sync gate: default output is a concise count and safe pointer, with no coo
       );
     });
     assert.match(output, /1 distinct potential secret/);
-    assert.match(output, /annals sync origin --report/);
+    assert.match(output, /same sync command[\s\S]*adding --report/);
     assert.match(output, /If you are a HUMAN/);
     assert.match(output, /If you are an AGENT/);
     assert.ok(!output.includes(finding.fingerprint), "default output must omit fingerprints");
