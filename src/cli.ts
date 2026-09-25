@@ -1,100 +1,155 @@
 #!/usr/bin/env node
-/**
- * Minimal CLI for the default `annals` namespace: the two commands transport
- * needs to exist (`transport-push` for the pre-push hook, `sync` for manual
- * use). Vocabulary owners ship their own CLIs for their own
- * namespaces; this one exists so a bare `annals` install is self-contained.
- */
-import { findRepo } from "./git.js";
+import { findRepo, type RepoInfo } from "./git.js";
 import { openLedger } from "./ledger.js";
-import { parsePrePushRefs, ScanBlockedError, sync, transportPush } from "./store.js";
+import {
+  createNamespaceProfile,
+  listNamespaceProfiles,
+  loadNamespaceProfile,
+  profilePath,
+  removeNamespaceProfile,
+  saveNamespaceProfile,
+  type NamespaceProfile,
+  type ProfileScope,
+} from "./profiles.js";
+import { recordsCommandUsage, runRecordsCommand } from "./records-command.js";
 
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-  return Buffer.concat(chunks).toString("utf8");
+function takeOption(args: string[], name: string): string | undefined {
+  const direct = args.indexOf(`--${name}`);
+  const equal = args.findIndex((arg) => arg.startsWith(`--${name}=`));
+  if (direct >= 0 && equal >= 0) throw new Error(`duplicate option --${name}`);
+  if (equal >= 0) {
+    const value = args.splice(equal, 1)[0]!.slice(name.length + 3);
+    if (!value) throw new Error(`--${name} requires a value`);
+    return value;
+  }
+  if (direct < 0) return undefined;
+  const value = args[direct + 1];
+  if (!value || value.startsWith("--")) throw new Error(`--${name} requires a value`);
+  args.splice(direct, 2);
+  return value;
 }
 
-async function requireLedger() {
-  const repo = await findRepo(process.cwd());
-  if (!repo) {
-    process.stderr.write("annals: not inside a git repository\n");
-    process.exit(2);
-  }
-  return openLedger(repo);
+function takeBoolean(args: string[], name: string): boolean {
+  const index = args.indexOf(`--${name}`);
+  if (index < 0) return false;
+  args.splice(index, 1);
+  return true;
 }
 
-async function cmdTransportPush(positional: string[], flags: Set<string>): Promise<void> {
+async function requireRepo(): Promise<RepoInfo> {
   const repo = await findRepo(process.cwd());
-  if (!repo) return; // a hook must never fail the user's push
-  const ledger = openLedger(repo);
-  const remote = positional[0] || "origin";
-  // git's pre-push hook pipes the refs being pushed. Only read when stdin is
-  // actually a pipe: a manual `annals transport-push` from a terminal would
-  // otherwise block forever waiting on a human who has nothing to type.
-  let revs: string[] = [];
-  if (process.stdin.isTTY !== true) {
-    try {
-      revs = parsePrePushRefs(await readStdin());
-    } catch {
-      revs = []; // unreadable stdin must never fail the user's push
-    }
+  if (!repo) throw new Error("not inside a git repository");
+  return repo;
+}
+
+function profileUsage(): string {
+  return [
+    "usage:",
+    "  annals profile list",
+    "  annals profile show NAME",
+    "  annals profile add NAME --namespace NAME [namespace options] [--local]",
+    "  annals profile remove NAME [--local]",
+    "",
+    "namespace options:",
+    "  --incoming NAME --internal-env NAME --state-dir NAME",
+    "  --config-file NAME --user-config-dir NAME --cli-name NAME",
+  ].join("\n");
+}
+
+async function profileCommand(args: string[]): Promise<number> {
+  const subcommand = args.shift();
+  if (!subcommand || subcommand === "help" || subcommand === "--help") {
+    process.stdout.write(`${profileUsage()}\n`);
+    return 0;
   }
-  try {
-    await transportPush(ledger, remote, revs, { reportFindings: flags.has("report") });
-  } catch (err) {
-    if (err instanceof ScanBlockedError) {
-      // transport.strict: nonzero exit makes git abort the entire push.
-      process.stderr.write("annals: entire push blocked (transport.strict is enabled)\n");
-      process.exit(1);
+  const local = takeBoolean(args, "local");
+  const scope: ProfileScope = local ? "local" : "global";
+  const repo = await findRepo(process.cwd());
+  if (local && !repo) throw new Error("--local requires a git repository");
+
+  if (subcommand === "list") {
+    if (local) throw new Error("--local is only valid with profile add or profile remove");
+    if (args.length > 0) throw new Error("profile list accepts no arguments");
+    const profiles = await listNamespaceProfiles(repo);
+    for (const name of Object.keys(profiles).sort()) process.stdout.write(`${name}\n`);
+    return 0;
+  }
+  const name = args.shift();
+  if (!name) throw new Error(`profile ${subcommand} requires a name`);
+
+  if (subcommand === "show") {
+    if (local) throw new Error("--local is only valid with profile add or profile remove");
+    if (args.length > 0) throw new Error("profile show accepts only a name");
+    process.stdout.write(`${JSON.stringify(await loadNamespaceProfile(repo, name), null, 2)}\n`);
+    return 0;
+  }
+  if (subcommand === "remove") {
+    if (args.length > 0) throw new Error("profile remove accepts only a name and optional --local");
+    const removed = await removeNamespaceProfile(repo, name, scope);
+    if (!removed) throw new Error(`profile "${name}" does not exist in ${scope} scope`);
+    process.stderr.write(`annals: removed ${scope} profile "${name}"\n`);
+    return 0;
+  }
+  if (subcommand === "add") {
+    const namespace = takeOption(args, "namespace");
+    if (!namespace) throw new Error("profile add requires --namespace NAME");
+    const partial: Partial<NamespaceProfile> & { name: string } = { name: namespace };
+    const options: Array<[string, keyof NamespaceProfile]> = [
+      ["incoming", "incomingName"],
+      ["internal-env", "internalEnvName"],
+      ["state-dir", "stateDirName"],
+      ["config-file", "configFile"],
+      ["user-config-dir", "userConfigDir"],
+      ["cli-name", "cliName"],
+    ];
+    for (const [flag, field] of options) {
+      const value = takeOption(args, flag);
+      if (value !== undefined) partial[field] = value;
     }
-    // Anything else is an annals bug or environment problem; the user's
-    // code push must proceed regardless.
+    if (args.length > 0) throw new Error(`unknown profile option ${args[0]}`);
+    const profile = createNamespaceProfile(partial);
+    await saveNamespaceProfile(repo, name, profile, scope);
     process.stderr.write(
-      `annals: transport-push error (push continues): ${err instanceof Error ? err.message : String(err)}\n`,
+      `annals: saved ${scope} profile "${name}" at ${profilePath(repo, scope)}\n`,
     );
+    return 0;
   }
+  throw new Error(`unknown profile command "${subcommand}"\n\n${profileUsage()}`);
 }
 
-async function cmdSync(positional: string[], flags: Set<string>): Promise<void> {
-  const ledger = await requireLedger();
-  const remote = positional[0] || "origin";
-  const result = await sync(ledger, remote, "both", {
-    skipScan: flags.has("no-scan"),
-    reportFindings: flags.has("report"),
-    ...(flags.has("all") ? { scope: null } : {}),
-  });
-  const pushed =
-    result.scopedAnchors === null
-      ? "pushed (whole ledger)"
-      : `pushed (${result.scopedAnchors} commit(s) in scope)`;
-  process.stderr.write(
-    `sync ${remote}: ${result.fetched ? "fetched+merged" : "nothing fetched"}, ${pushed}\n`,
-  );
-}
-
-async function main(): Promise<void> {
+async function main(): Promise<number> {
   const args = process.argv.slice(2);
-  const positional = args.filter((a) => !a.startsWith("--"));
-  const flags = new Set(args.filter((a) => a.startsWith("--")).map((a) => a.slice(2)));
-  const command = positional.shift();
-  switch (command) {
-    case "transport-push":
-      return cmdTransportPush(positional, flags);
-    case "sync":
-      return cmdSync(positional, flags);
-    default:
-      process.stderr.write(
-        "usage:\n" +
-          "  annals sync [remote] [--no-scan] [--all] [--report]  fetch+push the annals notes ref\n" +
-          "  annals transport-push [remote] [--report]           pre-push hook entrypoint\n" +
-          "\n--report prints finding coordinates and fingerprints, never matched content.\n",
-      );
-      process.exit(command === undefined || command === "help" ? 0 : 2);
+  const profileName = takeOption(args, "profile");
+  if (args[0] === "profile") {
+    if (profileName) throw new Error("--profile cannot be combined with profile maintenance");
+    return profileCommand(args.slice(1));
   }
+  const canonical = args[0] === "records";
+  if (canonical) args.shift();
+  const commandName = canonical ? "annals records" : "annals";
+  if (!profileName && (!args[0] || args[0] === "help" || args[0] === "--help" || args[0] === "-h")) {
+    process.stdout.write(`${recordsCommandUsage(commandName)}\n`);
+    return 0;
+  }
+  const repo = await requireRepo();
+  const namespace = profileName ? await loadNamespaceProfile(repo, profileName) : undefined;
+  const ledger = openLedger(repo, namespace);
+  return runRecordsCommand({
+    ledger,
+    argv: args,
+    stdin: process.stdin,
+    stdout: process.stdout,
+    stderr: process.stderr,
+    env: process.env,
+    commandName,
+  });
 }
 
-main().catch((err) => {
-  process.stderr.write(`annals: ${err instanceof Error ? err.message : String(err)}\n`);
-  process.exit(1);
-});
+main()
+  .then((code) => {
+    process.exitCode = code;
+  })
+  .catch((err) => {
+    process.stderr.write(`annals: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exitCode = 2;
+  });

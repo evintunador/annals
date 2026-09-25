@@ -41,6 +41,7 @@ import { collectMatches, redactDraft, type ExtraValueGroup, type RedactionRecord
 import { captureRules, collectEnvValues, loadConfig, type AnnalsConfig } from "./redact/config.js";
 import { knownSecretCount, loadKnownSecrets, rememberKnownSecrets } from "./redact/known-secrets.js";
 import { RULESET_VERSION, type RedactionRule } from "./redact/rules.js";
+import { runtimeEnv, runtimeStderr } from "./runtime.js";
 import {
   conciseFindingGuidance,
   conciseTransportFindingGuidance,
@@ -211,7 +212,7 @@ export async function appendEvents(
       );
     }
     if (bytes > warnBytes) {
-      process.stderr.write(
+      runtimeStderr().write(
         `${repo.ns.cliName}: event ${event.id.slice(0, 16)} (${event.kind}) is ${bytes} bytes — ` +
           `git notes replicate to every clone; prefer a pointer + hash for large artifacts ` +
           `(tune with limits.warnEventBytes in ${repo.ns.configFile}).\n`,
@@ -610,15 +611,16 @@ async function autoReAnchor(repo: Ledger): Promise<void> {
     const result = await runReAnchor(repo, { target, apply: true });
     if (result.applied.length > 0) {
       const anchors = result.detected.reduce((n, d) => n + d.notedAnchors, 0);
-      process.stderr.write(
+      runtimeStderr().write(
         `${repo.ns.cliName}: re-anchored ${anchors} record anchor(s) rewritten away by ${target} ` +
           `(mappings recorded in the ledger)\n`,
       );
     }
     if (result.ambiguous.length > 0) {
-      process.stderr.write(
+      runtimeStderr().write(
         `${repo.ns.cliName}: branch(es) ${result.ambiguous.join(", ")} look rewritten onto ${target} but ` +
-          `match more than one commit — run \`${repo.ns.cliName} re-anchor\` to resolve manually\n`,
+          "match more than one commit — use the owning producer's documented manual " +
+          "re-anchor workflow to resolve it\n",
       );
     }
     await ensureStateDir(repo);
@@ -867,15 +869,15 @@ async function runScanGate(
 
   const eventIds = [...new Set(findings.map((f) => f.eventId))];
   const spans = new Set(findings.map((f) => f.fingerprint)).size;
-  process.stderr.write(
+  runtimeStderr().write(
     `${repo.ns.cliName} ${invocation === "transport" ? "pre-push scan" : "sync"}: blocked — ` +
       `${spans} distinct potential secret(s) ` +
       `(${findings.length} match site(s) across ${eventIds.length} event(s)) not yet on ${remote}\n\n`,
   );
   if (reportFindings) {
-    process.stderr.write(`${formatGroupedReport(findings)}\n`);
-    process.stderr.write(`\n${findingGuidance(repo.ns.cliName, eventIds)}\n`);
-    process.stderr.write(
+    runtimeStderr().write(`${formatGroupedReport(findings)}\n`);
+    runtimeStderr().write(`\n${findingGuidance(repo.ns.cliName, eventIds)}\n`);
+    runtimeStderr().write(
       invocation === "transport"
         ? "\nUse the owning producer's documented workflow to review and remediate the finding, " +
             "then retry the same git push.\n"
@@ -883,7 +885,7 @@ async function runScanGate(
             "then retry this sync. A caller may explicitly bypass the gate with skipScan/--no-scan.\n",
     );
   } else {
-    process.stderr.write(
+    runtimeStderr().write(
       `${invocation === "transport"
         ? conciseTransportFindingGuidance()
         : conciseFindingGuidance(repo.ns.cliName, remote)}\n`,
@@ -898,8 +900,6 @@ export interface SyncOptions {
   scope?: string | string[] | null;
   /** Print the coordinate-only finding report when the scan gate blocks. */
   reportFindings?: boolean;
-  /** @internal Select pre-push wording when transportPush delegates here. */
-  scanInvocation?: "sync" | "transport";
 }
 
 /**
@@ -913,6 +913,16 @@ export async function sync(
   remote = "origin",
   mode: "both" | "push" | "fetch" = "both",
   opts: SyncOptions = {},
+): Promise<SyncResult> {
+  return syncWithInvocation(repo, remote, mode, opts, "sync");
+}
+
+async function syncWithInvocation(
+  repo: Ledger,
+  remote: string,
+  mode: "both" | "push" | "fetch",
+  opts: SyncOptions,
+  scanInvocation: "sync" | "transport",
 ): Promise<SyncResult> {
   const result: SyncResult = { fetched: false, pushed: false, scopedAnchors: null };
   await ensureMergeConfig(repo);
@@ -943,14 +953,15 @@ export async function sync(
         anchors,
         config,
         opts.reportFindings === true,
-        opts.scanInvocation ?? "sync",
+        scanInvocation,
       );
     }
     // The pushed child git inherits the internal guard env var, telling the
     // pre-push transport hook this push *is* the notes push — no recursion.
     const guard = internalEnvVar(repo.ns);
-    const prior = process.env[guard];
-    process.env[guard] = "1";
+    const env = runtimeEnv();
+    const prior = env[guard];
+    env[guard] = "1";
     try {
       if (anchors === null) {
         await git(["push", remote, `${notesRef(repo.ns)}:${notesRef(repo.ns)}`], { cwd: repo.root });
@@ -958,8 +969,8 @@ export async function sync(
         await pushScopedNotes(repo, remote, anchors);
       }
     } finally {
-      if (prior === undefined) delete process.env[guard];
-      else process.env[guard] = prior;
+      if (prior === undefined) delete env[guard];
+      else env[guard] = prior;
     }
     result.pushed = true;
     result.scopedAnchors = anchors === null ? null : anchors.length;
@@ -1028,7 +1039,7 @@ export async function transportPush(
   // append, never on push) — and a hook/CLI guard mismatch otherwise storms:
   // hook -> transport-push -> notes push -> hook -> ... with a full scan at
   // every level. Observed in the wild before this check existed.
-  if (process.env[internalEnvVar(repo.ns)]) return { pushed: false, held: false };
+  if (runtimeEnv()[internalEnvVar(repo.ns)]) return { pushed: false, held: false };
   const config = await loadConfig(repo);
   if (config.transport?.hook === false) return { pushed: false, held: false };
   const hasNotes = (await git(["rev-parse", "--verify", "--quiet", notesRef(repo.ns)], {
@@ -1040,22 +1051,27 @@ export async function transportPush(
   try {
     // No usable refs (deletes only, or an old hook that ate stdin): fall back
     // to the checked-out branch rather than to the whole ledger.
-    await sync(repo, remote, "push", {
-      scope: revs && revs.length > 0 ? revs : ["HEAD"],
-      scanInvocation: "transport",
-      ...(opts.reportFindings === true ? { reportFindings: true } : {}),
-    });
+    await syncWithInvocation(
+      repo,
+      remote,
+      "push",
+      {
+        scope: revs && revs.length > 0 ? revs : ["HEAD"],
+        ...(opts.reportFindings === true ? { reportFindings: true } : {}),
+      },
+      "transport",
+    );
     return { pushed: true, held: false };
   } catch (err) {
     if (err instanceof ScanBlockedError) {
       if (config.transport?.strict === true) throw err;
-      process.stderr.write(
+      runtimeStderr().write(
         `${repo.ns.cliName}: records were held back from this push (potential secrets); ` +
           "your code push continues. Follow the review guidance above, then retry the push.\n",
       );
       return { pushed: false, held: true };
     }
-    process.stderr.write(
+    runtimeStderr().write(
       `${repo.ns.cliName}: notes push skipped (${err instanceof Error ? err.message : String(err)})\n`,
     );
     return { pushed: false, held: false };

@@ -19,6 +19,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Ledger } from "../ledger.js";
+import { runtimeStderr } from "../runtime.js";
 
 const STORE_MODE = 0o600;
 const STORE_VERSION = 2;
@@ -182,7 +183,7 @@ export async function loadKnownSecrets(repo: Ledger): Promise<KnownSecrets> {
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      process.stderr.write(
+      runtimeStderr().write(
         `${repo.ns.cliName}: warning: known-secrets store is unreadable; ` +
           `remembered-secret protection is inactive until the file is repaired\n`,
       );

@@ -97,6 +97,13 @@ sync explicitly. Multiple annals namespaces may share a shell hook, although
 only the first block can consume Git's stdin; later blocks safely fall back to
 `HEAD` scope.
 
+The reusable records-command dispatcher sits above these mechanics but below
+producer semantics. It accepts an already-opened ledger plus explicit argv and
+I/O streams, so downstream tools can expose a consistent `records` command
+namespace without surrendering their top-level vocabulary. Named profiles are
+local mappings to complete namespace descriptors; they never infer ownership
+from refs and never persist executable hook paths.
+
 ## Privacy and integrity
 
 The privacy stack is deliberately layered:

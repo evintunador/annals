@@ -110,3 +110,10 @@ ensure that `cliName` resolves on `PATH` to a CLI implementing
 
 Existing namespaces can override `incomingName` and `internalEnvName` to keep
 already-installed refspecs and recursion guards compatible.
+
+Named CLI profiles persist the complete non-executable portion of a namespace
+descriptor. Global profiles are stored in
+`~/.config/annals/profiles.json`; repository-local overrides are stored below
+the common Git directory and are never committed. Profiles cannot contain
+`hookInvocation`; the namespace-owning CLI must install and maintain its own
+hook. See [downstream CLI integration](downstream-integration.md#namespace-profiles).

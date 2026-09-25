@@ -22,6 +22,7 @@ sources synchronized:
 | Install, build, test, or release commands | `README.md` and `docs/development.md` |
 | Redaction, scanning, transport, or re-anchoring behavior | `docs/architecture.md` |
 | CLI commands or flags | `README.md` |
+| Downstream dispatcher, profiles, or command conventions | `docs/downstream-integration.md` |
 
 Use durable links to the documents above instead of references to temporary
 plans or WIP files. Examples should use annals terminology unless they are

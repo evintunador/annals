@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
+import { runtimeEnv } from "./runtime.js";
 
 const execFileP = promisify(execFile);
 
@@ -26,6 +27,7 @@ export async function git(args: string[], opts: GitRunOptions): Promise<string> 
     const child = execFileP("git", args, {
       cwd: opts.cwd,
       maxBuffer: 512 * 1024 * 1024,
+      env: runtimeEnv(),
     });
     if (opts.input !== undefined) {
       child.child.stdin?.write(opts.input);
