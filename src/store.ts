@@ -42,6 +42,7 @@ import { captureRules, collectEnvValues, loadConfig, type AnnalsConfig } from ".
 import { knownSecretCount, loadKnownSecrets, rememberKnownSecrets } from "./redact/known-secrets.js";
 import { RULESET_VERSION, type RedactionRule } from "./redact/rules.js";
 import {
+  conciseFindingGuidance,
   filterFindings,
   findingGuidance,
   formatGroupedReport,
@@ -776,7 +777,7 @@ async function remoteNoteIds(repo: Ledger, remote: string): Promise<Set<string> 
 /** Thrown when the layer-E scan gate blocks a push; carries no secrets. */
 export class ScanBlockedError extends Error {
   constructor(public readonly findings: number, cliName = "annals") {
-    super(`${cliName} sync: push blocked — ${findings} potential secret(s) found (see report above)`);
+    super(`${cliName} sync: push blocked — ${findings} potential secret match(es) found`);
   }
 }
 
@@ -838,6 +839,7 @@ async function runScanGate(
   tier: "standard" | "paranoid",
   anchors: string[] | null,
   config?: AnnalsConfig,
+  reportFindings = false,
 ): Promise<void> {
   const remoteIds = await remoteNoteIds(repo, remote);
 
@@ -867,16 +869,28 @@ async function runScanGate(
     `${repo.ns.cliName} sync: blocked — ${spans} distinct potential secret(s) ` +
       `(${findings.length} match site(s) across ${eventIds.length} event(s)) not yet on ${remote}\n\n`,
   );
-  process.stderr.write(`${formatGroupedReport(findings)}\n`);
-  process.stderr.write(`\n${findingGuidance(repo.ns.cliName, eventIds)}\n`);
-  process.stderr.write(
-    "\nRemediate, then re-run sync:\n" +
-      `  ${repo.ns.cliName} review                walk each span interactively (humans, plain terminal)\n` +
-      `  ${repo.ns.cliName} redact <event-id>     rewrite the event and remove the secret\n` +
-      `  ${repo.ns.cliName} allow <fingerprint>   mark a fingerprint as a known false positive\n` +
-      `  ${repo.ns.cliName} sync --no-scan        skip this gate for this sync only\n`,
-  );
+  if (reportFindings) {
+    process.stderr.write(`${formatGroupedReport(findings)}\n`);
+    process.stderr.write(`\n${findingGuidance(repo.ns.cliName, eventIds)}\n`);
+    process.stderr.write(
+      "\nRemediate, then re-run sync:\n" +
+        `  ${repo.ns.cliName} review                walk each span interactively (humans, plain terminal)\n` +
+        `  ${repo.ns.cliName} redact <event-id>     rewrite the event and remove the secret\n` +
+        `  ${repo.ns.cliName} allow <fingerprint>   mark a fingerprint as a known false positive\n` +
+        `  ${repo.ns.cliName} sync --no-scan        skip this gate for this sync only\n`,
+    );
+  } else {
+    process.stderr.write(`${conciseFindingGuidance(repo.ns.cliName, remote)}\n`);
+  }
   throw new ScanBlockedError(findings.length, repo.ns.cliName);
+}
+
+export interface SyncOptions {
+  skipScan?: boolean;
+  paranoid?: boolean;
+  scope?: string | string[] | null;
+  /** Print the coordinate-only finding report when the scan gate blocks. */
+  reportFindings?: boolean;
 }
 
 /**
@@ -889,7 +903,7 @@ export async function sync(
   repo: Ledger,
   remote = "origin",
   mode: "both" | "push" | "fetch" = "both",
-  opts: { skipScan?: boolean; paranoid?: boolean; scope?: string | string[] | null } = {},
+  opts: SyncOptions = {},
 ): Promise<SyncResult> {
   const result: SyncResult = { fetched: false, pushed: false, scopedAnchors: null };
   await ensureMergeConfig(repo);
@@ -913,7 +927,7 @@ export async function sync(
     if (!scanDisabled) {
       const tier: "standard" | "paranoid" =
         opts.paranoid === true || config.scan?.tier === "paranoid" ? "paranoid" : "standard";
-      await runScanGate(repo, remote, tier, anchors, config);
+      await runScanGate(repo, remote, tier, anchors, config, opts.reportFindings === true);
     }
     // The pushed child git inherits the internal guard env var, telling the
     // pre-push transport hook this push *is* the notes push — no recursion.
@@ -940,6 +954,11 @@ export interface TransportPushResult {
   pushed: boolean;
   /** True when scan findings held the ledger back (non-strict mode). */
   held: boolean;
+}
+
+export interface TransportPushOptions {
+  /** Print the coordinate-only finding report when the scan gate blocks. */
+  reportFindings?: boolean;
 }
 
 /**
@@ -985,6 +1004,7 @@ export async function transportPush(
   repo: Ledger,
   remote: string,
   revs?: string[],
+  opts: TransportPushOptions = {},
 ): Promise<TransportPushResult> {
   // Recursion breaker. The pre-push hook already checks this guard, but the
   // hook text on disk can predate a guard rename (hooks only self-upgrade on
@@ -1003,15 +1023,18 @@ export async function transportPush(
   try {
     // No usable refs (deletes only, or an old hook that ate stdin): fall back
     // to the checked-out branch rather than to the whole ledger.
-    await sync(repo, remote, "push", { scope: revs && revs.length > 0 ? revs : ["HEAD"] });
+    await sync(repo, remote, "push", {
+      scope: revs && revs.length > 0 ? revs : ["HEAD"],
+      ...(opts.reportFindings === true ? { reportFindings: true } : {}),
+    });
     return { pushed: true, held: false };
   } catch (err) {
     if (err instanceof ScanBlockedError) {
       if (config.transport?.strict === true) throw err;
       process.stderr.write(
-        `${repo.ns.cliName}: records were held back from this push (potential secrets — ` +
-          `see report above); your code push continues. Run \`${repo.ns.cliName} sync\` to review and ` +
-          "remediate.\n",
+        `${repo.ns.cliName}: records were held back from this push (potential secrets); ` +
+          `your code push continues. Run \`${repo.ns.cliName} sync ${remote} ` +
+          "--report` in a plain terminal to review and remediate.\n",
       );
       return { pushed: false, held: true };
     }

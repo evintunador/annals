@@ -83,6 +83,26 @@ the checked-out branch. And a custom namespace's hook only fires if its
 `cliName` is on PATH or `hookInvocation` was given; otherwise its owner
 syncs through the library.
 
+## Sync scan reports
+
+`annals sync` and the pre-push transport scan new records before sharing
+them. A finding blocks the records push (and, with `transport.strict`, the
+code push) but prints only aggregate counts and a safe handoff by default.
+It does not print fingerprints, event ids, coordinates, matched text, or
+surrounding context.
+
+A human or CI job can deliberately request the coordinate-only report:
+
+```sh
+annals sync origin --report
+```
+
+The report includes fingerprints and event/path coordinates for remediation,
+but never matched text or context. Coding agents should not request the report
+or inspect the flagged events; hand the concise message to a human working in
+a plain terminal. `--report` changes presentation only: findings still block
+the same push and produce the same nonzero exit status.
+
 ## Size policy
 
 Records carry pointers, digests, and spans — never large artifacts. Git notes
