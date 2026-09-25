@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import type { Ledger } from "../ledger.js";
 import { join } from "node:path";
 import { rulesForTier, type RedactionRule } from "./rules.js";
+import { runtimeEnv, runtimeHome, runtimeStderr } from "../runtime.js";
 
 export interface AnnalsConfig {
   /**
@@ -110,14 +110,14 @@ async function readJsonConfig(cliName: string, path: string): Promise<AnnalsConf
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       return parsed as AnnalsConfig;
     }
-    process.stderr.write(
+    runtimeStderr().write(
       `${cliName}: ignoring ${path} — expected a JSON object, got ` +
         `${Array.isArray(parsed) ? "an array" : typeof parsed}. All settings in it are ` +
         `inactive; defaults are in effect.\n`,
     );
     return null;
   } catch (err) {
-    process.stderr.write(
+    runtimeStderr().write(
       `${cliName}: ignoring ${path} — invalid JSON (${err instanceof Error ? err.message : String(err)}). ` +
         `All settings in it are inactive; defaults are in effect.\n`,
     );
@@ -159,7 +159,7 @@ function mergeSection<T extends object>(
  * "transport", "reanchor") — see mergeSection for why not per-section.
  */
 export async function loadConfig(repo: Ledger): Promise<AnnalsConfig> {
-  const userPath = join(homedir(), ".config", repo.ns.userConfigDir, "config.json");
+  const userPath = join(runtimeHome(), ".config", repo.ns.userConfigDir, "config.json");
   const repoPath = join(repo.root, repo.ns.configFile);
   const [userConfig, repoConfig] = await Promise.all([
     readJsonConfig(repo.ns.cliName, userPath),
@@ -241,7 +241,7 @@ async function parseDotEnv(path: string): Promise<string[]> {
  */
 export async function collectEnvValues(repoRoot: string): Promise<string[]> {
   const values = new Set<string>();
-  for (const [name, value] of Object.entries(process.env)) {
+  for (const [name, value] of Object.entries(runtimeEnv())) {
     if (!value || value.length < 8) continue;
     if (NON_SECRET_ENV_NAME.test(name)) continue;
     if (value.startsWith("/")) continue;

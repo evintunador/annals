@@ -9,6 +9,23 @@ export {
 } from "./ledger.js";
 export type { Ledger, NamespaceConfig } from "./ledger.js";
 export {
+  createNamespaceProfile,
+  listNamespaceProfiles,
+  loadNamespaceProfile,
+  profilePath,
+  removeNamespaceProfile,
+  saveNamespaceProfile,
+  validateNamespaceProfile,
+  validateProfileName,
+} from "./profiles.js";
+export type { NamespaceProfile, ProfileScope } from "./profiles.js";
+export { recordsCommandUsage, runRecordsCommand } from "./records-command.js";
+export type {
+  RecordsCommandInput,
+  RecordsCommandOptions,
+  RecordsCommandOutput,
+} from "./records-command.js";
+export {
   appendEvents,
   captureContext,
   listAnchors,
@@ -107,7 +124,16 @@ export {
 } from "./redact/scan.js";
 export type { Finding, FingerprintGroup, RenderOptions } from "./redact/scan.js";
 export { runReview, escapeLiteral, wrapRuns, renderView } from "./review.js";
-export type { ReviewOptions, ReviewSummary, Run, Screen, ViewState } from "./review.js";
+export type {
+  ReviewInput,
+  ReviewOptions,
+  ReviewOutput,
+  ReviewSummary,
+  ReviewTerminal,
+  Run,
+  Screen,
+  ViewState,
+} from "./review.js";
 export {
   commitDateIso,
   defaultRewriteTarget,

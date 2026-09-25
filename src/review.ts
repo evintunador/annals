@@ -35,6 +35,8 @@ export interface ReviewOptions {
   tier: "standard" | "paranoid";
   /** Characters of surrounding context on each side of the match. */
   context: number;
+  /** Invocation prefix used in remediation guidance and audit reasons. */
+  commandName?: string;
 }
 
 export interface ReviewSummary {
@@ -43,6 +45,27 @@ export interface ReviewSummary {
   redacted: number;
   skipped: number;
   errors: string[];
+}
+
+export interface ReviewInput {
+  setRawMode(mode: boolean): void;
+  resume(): void;
+  pause(): void;
+  on(event: "data", listener: (data: Buffer) => void): unknown;
+  off(event: "data", listener: (data: Buffer) => void): unknown;
+}
+
+export interface ReviewOutput {
+  write(text: string): unknown;
+  readonly columns?: number;
+  readonly rows?: number;
+  on(event: "resize", listener: () => void): unknown;
+  off(event: "resize", listener: () => void): unknown;
+}
+
+export interface ReviewTerminal {
+  stdin: ReviewInput;
+  stdout: ReviewOutput;
 }
 
 /** Escape a matched span into a regex that matches exactly that text. */
@@ -220,9 +243,12 @@ export function renderView(screen: Screen, view: ViewState): void {
   screen.write(menu.join("\n"));
 }
 
-async function readKeys(onKey: (key: string) => Promise<boolean>): Promise<void> {
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
+async function readKeys(
+  input: ReviewInput,
+  onKey: (key: string) => Promise<boolean>,
+): Promise<void> {
+  input.setRawMode(true);
+  input.resume();
   return new Promise((resolve, reject) => {
     let busy = false;
     const listener = (buf: Buffer) => {
@@ -233,16 +259,16 @@ async function readKeys(onKey: (key: string) => Promise<boolean>): Promise<void>
         .then((done) => {
           busy = false;
           if (done) {
-            process.stdin.off("data", listener);
+            input.off("data", listener);
             resolve();
           }
         })
         .catch((err: unknown) => {
-          process.stdin.off("data", listener);
+          input.off("data", listener);
           reject(err instanceof Error ? err : new Error(String(err)));
         });
     };
-    process.stdin.on("data", listener);
+    input.on("data", listener);
   });
 }
 
@@ -265,7 +291,11 @@ async function loadGroups(
  * The interactive loop. Assumes the caller has already verified this is not
  * an agent session and both stdin and stdout are TTYs.
  */
-export async function runReview(repo: Ledger, opts: ReviewOptions): Promise<ReviewSummary> {
+export async function runReview(
+  repo: Ledger,
+  opts: ReviewOptions,
+  terminal: ReviewTerminal = { stdin: process.stdin, stdout: process.stdout },
+): Promise<ReviewSummary> {
   const summary: ReviewSummary = {
     allowed: 0,
     allowedGlobally: 0,
@@ -278,12 +308,12 @@ export async function runReview(repo: Ledger, opts: ReviewOptions): Promise<Revi
   if (groups.length === 0) return summary;
 
   const screen: Screen = {
-    write: (s) => process.stdout.write(s),
+    write: (s) => void terminal.stdout.write(s),
     get columns() {
-      return process.stdout.columns ?? 80;
+      return terminal.stdout.columns ?? 80;
     },
     get rows() {
-      return process.stdout.rows ?? 24;
+      return terminal.stdout.rows ?? 24;
     },
   };
 
@@ -323,14 +353,14 @@ export async function runReview(repo: Ledger, opts: ReviewOptions): Promise<Revi
     return false;
   };
 
-  process.stdout.write("\x1b[?1049h\x1b[?25l"); // alternate screen, hide cursor
-  const restore = () => process.stdout.write("\x1b[?25h\x1b[?1049l");
+  terminal.stdout.write("\x1b[?1049h\x1b[?25l"); // alternate screen, hide cursor
+  const restore = () => terminal.stdout.write("\x1b[?25h\x1b[?1049l");
   const onResize = () => render();
-  process.stdout.on("resize", onResize);
+  terminal.stdout.on("resize", onResize);
 
   try {
     render();
-    await readKeys(async (key) => {
+    await readKeys(terminal.stdin, async (key) => {
       message = "";
       if (confirmRedact) {
         confirmRedact = false;
@@ -341,13 +371,18 @@ export async function runReview(repo: Ledger, opts: ReviewOptions): Promise<Revi
           const value = event ? collectStrings(event).get(f.path) : undefined;
           const span = value?.slice(f.start, f.end);
           if (!span) {
-            message = `cannot recover the span text (event rewritten?) — use ${repo.ns.cliName} redact by hand`;
+            message =
+              `cannot recover the span text (event rewritten?) — use ` +
+              `${opts.commandName ?? repo.ns.cliName} redact by hand`;
           } else {
             const pattern = escapeLiteral(span);
             let ok = 0;
             for (const eventId of group.eventIds) {
               try {
-                await redactEvent(repo, eventId, { pattern, reason: `${repo.ns.cliName} review` });
+                await redactEvent(repo, eventId, {
+                  pattern,
+                  reason: `${opts.commandName ?? repo.ns.cliName} review`,
+                });
                 ok += 1;
               } catch (err) {
                 const why =
@@ -427,9 +462,9 @@ export async function runReview(repo: Ledger, opts: ReviewOptions): Promise<Revi
       return false;
     });
   } finally {
-    process.stdout.off("resize", onResize);
-    process.stdin.setRawMode(false);
-    process.stdin.pause();
+    terminal.stdout.off("resize", onResize);
+    terminal.stdin.setRawMode(false);
+    terminal.stdin.pause();
     restore();
   }
   return summary;

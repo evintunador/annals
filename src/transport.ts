@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { git } from "./git.js";
 import { incomingRef, notesRef, type Ledger, type NamespaceConfig } from "./ledger.js";
 import { type AnnalsConfig } from "./redact/config.js";
+import { runtimeEnv, runtimeStderr } from "./runtime.js";
 
 const execFileP = promisify(execFile);
 
@@ -130,7 +131,7 @@ async function warnOnce(repo: Ledger, key: string, message: string): Promise<voi
     // first warning, or unreadable state — state is rebuildable
   }
   if (warned.includes(key)) return;
-  process.stderr.write(message);
+  runtimeStderr().write(message);
   await mkdir(stateDir, { recursive: true });
   await writeFile(path, JSON.stringify([...warned, key]) + "\n");
 }
@@ -188,7 +189,7 @@ async function ensurePrePushHook(
       `${repo.ns.cliName}: core.hooksPath is set (${hooksPath}), so the pre-push hook was not ` +
         `installed. To share records on push, add\n` +
         `  ${repo.ns.cliName} transport-push "$1"\n` +
-        `to that pre-push hook, or run \`${repo.ns.cliName} sync\` manually.\n`,
+        "to that pre-push hook, or use the owning producer's documented sync workflow.\n",
     );
     return "skipped-hookspath";
   }
@@ -221,7 +222,7 @@ async function ensurePrePushHook(
       repo,
       "foreign-hook",
       `${repo.ns.cliName}: this repo's pre-push hook is not a shell script, so the hook was not ` +
-        `chained onto it. Run \`${repo.ns.cliName} sync\` to share records manually.\n`,
+        "chained onto it. Use the owning producer's documented sync workflow to share records manually.\n",
     );
     return "skipped-foreign";
   }
@@ -299,7 +300,9 @@ export async function absorbIncoming(repo: Ledger): Promise<boolean> {
  */
 export async function hasAuthorIdentity(): Promise<boolean> {
   try {
-    await execFileP("git", ["-c", "user.useConfigOnly=true", "var", "GIT_AUTHOR_IDENT"]);
+    await execFileP("git", ["-c", "user.useConfigOnly=true", "var", "GIT_AUTHOR_IDENT"], {
+      env: runtimeEnv(),
+    });
     return true;
   } catch {
     return false;

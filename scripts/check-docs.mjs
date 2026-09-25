@@ -95,8 +95,21 @@ for (const heading of ["## Install from source", "## Library quick start", "## C
   if (!readme.includes(heading)) failures.push(`README.md: missing ${heading}`);
 }
 
-for (const flag of ["--no-scan", "--all", "--report", "transport-push"]) {
+for (const flag of ["--no-scan", "--all", "--report", "--profile", "transport-push", "records review"]) {
   if (!readme.includes(flag)) failures.push(`README.md: missing CLI documentation for ${flag}`);
+}
+
+const integrationDoc = await readFile(join(root, "docs", "downstream-integration.md"), "utf8");
+for (const contract of [
+  "runRecordsCommand",
+  "<tool> records",
+  "hookInvocation",
+  "createNamespaceProfile",
+  "human-only",
+]) {
+  if (!integrationDoc.includes(contract)) {
+    failures.push(`docs/downstream-integration.md: missing integration contract ${contract}`);
+  }
 }
 
 const configDoc = await readFile(join(root, "docs", "configuration.md"), "utf8");

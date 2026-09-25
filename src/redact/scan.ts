@@ -7,10 +7,10 @@
  * therefore be noisier than the capture tier.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { sha256Hex } from "../canonical.js";
 import type { Ledger } from "../ledger.js";
+import { runtimeHome } from "../runtime.js";
 import type { EvidenceEvent } from "../schema.js";
 import { isExemptFromRedaction, walkStrings } from "./apply.js";
 import type { AnnalsConfig } from "./config.js";
@@ -365,7 +365,7 @@ function allowlistPath(repo: Ledger): string {
  * scratch.
  */
 function globalAllowlistPath(repo: Ledger): string {
-  return join(homedir(), ".config", repo.ns.userConfigDir, "allowlist.json");
+  return join(runtimeHome(), ".config", repo.ns.userConfigDir, "allowlist.json");
 }
 
 async function readAllowlistFile(path: string): Promise<string[]> {

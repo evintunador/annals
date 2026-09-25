@@ -81,26 +81,52 @@ through the library instead of relying on the pre-push hook.
 
 ## CLI
 
-The bundled CLI is deliberately limited to transport for the default `annals`
-namespace:
+The bundled CLI exposes namespace-independent record maintenance for the
+default `annals` namespace:
 
 ```text
-annals sync [remote] [--no-scan] [--all] [--report]
+annals sync [remote] [--fetch-only|--push-only] [--no-scan] [--paranoid] [--all] [--report]
+annals review [--tier standard|paranoid] [--context N]
+annals inspect --output FILE [--reveal]
+annals redact EVENT_ID (--pattern REGEX|--all)
+annals allow FINGERPRINT... [--global]
+annals reanchor [--target REV] [--apply]
 annals transport-push [remote] [--report]
 ```
+
+The equivalent `annals records review`, `annals records sync`, and other
+`annals records <command>` forms are also accepted, matching the convention
+recommended to downstream tools. The shorter forms are the native annals
+aliases.
 
 `sync` fetches, merges, scans, and pushes records reachable from `HEAD`.
 `--all` includes every local anchor, including other branches. `--no-scan`
 bypasses the pre-push secret gate for that invocation and should only be used
 after a human has reviewed the records outside an agent session. `--report`
 prints finding coordinates and fingerprints—but never matched content—when a
-scan blocks.
+scan blocks. `--paranoid` adds entropy-based scan candidates.
 `transport-push` is the pre-push hook entrypoint, not normally a command a
 human invokes.
 
-Appending and interpreting records—and interactive review/redaction commands—
-belong to producer libraries and their CLIs. The bare annals CLI does not
-pretend to understand those workflows.
+`review`, `inspect`, `redact`, and `allow` are human-only remediation commands.
+They refuse to run inside a recognized coding-agent session; review also
+requires a real terminal. `inspect` writes a mode-0600 file and refuses to
+overwrite an existing file unless `--overwrite` is explicit. None of these
+commands interpret producer payload semantics.
+
+Named profiles let the same commands operate on an explicitly registered
+downstream namespace:
+
+```text
+annals profile add example --namespace example-app --cli-name example-app
+annals --profile example review
+```
+
+Profiles are complete namespace descriptors after creation. They are stored
+in `~/.config/annals/profiles.json`; `--local` stores a repository-specific
+override under the common Git directory. Profiles cannot contain executable
+`hookInvocation` paths. See [downstream CLI integration](docs/downstream-integration.md)
+for the reusable dispatcher and command-naming convention.
 
 ## Documentation
 
@@ -109,6 +135,8 @@ pretend to understand those workflows.
 - [Configuration](docs/configuration.md) lists every setting and its default.
 - [Development and source installation](docs/development.md) covers local
   builds, checks, downstream consumption, and release status.
+- [Downstream CLI integration](docs/downstream-integration.md) defines the
+  portable `records` command namespace, aliases, profiles, and dispatcher.
 
 ## What annals owns, and what it refuses to own
 
