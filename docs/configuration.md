@@ -49,17 +49,20 @@ no-op, including transport setup. Existing records remain readable.
 
 ### `redact`
 
-- `capture` defaults to `true`. `false` disables both built-in capture rules
-  and configured capture patterns.
+- `capture` defaults to `true`. `false` disables all capture-time scrubbing:
+  built-in rules, configured patterns, eligible environment values, and known
+  secret matching. It does not disable the separate sync-time scan gate.
 - `env` defaults to `false`. When enabled, annals exact-matches values of at
   least eight characters from eligible process variables and the repository's
   `.env`. An explicit list of routine shell-variable names and values beginning
   with `/` are excluded; variable names otherwise do not need to look secret.
 - `knownSecrets` defaults to `false`. A producer's redact workflow may remember
   confirmed values as salted digests in a mode-0600 file below the common git
-  directory so later captures scrub them. Legacy plaintext stores are read for
-  compatibility and migrated to digests on the next update. The store is local
-  and never committed.
+  directory so later captures scrub them. Each entry also retains its exact
+  UTF-16 code-unit length and a four-bit salted rolling bucket used to narrow
+  candidate matching; plaintext is removed. Legacy plaintext stores are read
+  for compatibility and migrated on the next update. The store is local and
+  never committed.
 - `patterns` adds JavaScript regular expressions to the capture tier. Patterns
   are compiled with the global flag. Invalid patterns are skipped because
   configuration must not break capture.

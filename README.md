@@ -203,8 +203,9 @@ annals sync origin --report
 The report includes fingerprints and event/path coordinates for remediation,
 but never matched text or context. Coding agents should not request the report
 or inspect the flagged events; hand the concise message to a human working in
-a plain terminal. `--report` changes presentation only: findings still block
-the same push and produce the same nonzero exit status.
+a plain terminal. `--report` changes presentation only. A direct `sync` still
+exits nonzero; non-strict pre-push transport still holds back records while
+allowing the code push, and strict transport still aborts the code push.
 
 ## Size policy
 
