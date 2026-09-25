@@ -54,7 +54,7 @@ export interface RepoInfo {
    * worktree a private directory at `<main>/.git/worktrees/<name>/` for the
    * state that is genuinely per-worktree (HEAD, index, reflogs).
    *
-   * Almost nothing in cledger belongs here, and putting it here is a silent
+   * Almost no ledger state belongs here, and putting it here is a silent
    * bug rather than a loud one: state written under a worktree is invisible
    * from every other working tree, and git itself only ever runs hooks out of
    * the *common* directory. Use `commonDir` unless you specifically want
@@ -65,7 +65,7 @@ export interface RepoInfo {
    * The repository's shared git directory — identical for the main checkout
    * and every linked worktree. Refs (including the ledger's notes ref),
    * objects, config, and hooks all live here, which is why the ledger data
-   * itself was never worktree-scoped. All of cledger's local state hangs off
+   * itself was never worktree-scoped. All namespace-local state hangs off
    * this, so a worktree sees the same allowlist, known secrets, capture
    * cursors, and installed hook as everyone else.
    */

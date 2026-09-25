@@ -4,7 +4,7 @@ import { githubDriver, isGitHubOrigin } from "./github.js";
 /**
  * A forge is the place PRs/MRs live (GitHub, GitLab, ...). The ledger core
  * never depends on one: forge metadata only ever *suggests* re-anchor
- * mappings in the explicit `cledger re-anchor` command — the auto read path
+ * mappings in a producer CLI's explicit re-anchor command — the auto read path
  * stays offline, and nothing a forge says is recorded until a human
  * confirms it. Drivers therefore degrade to null (unavailable) rather than
  * erroring: no CLI installed, not authenticated, offline, unknown host —

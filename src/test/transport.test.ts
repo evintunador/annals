@@ -115,7 +115,7 @@ test("absorbIncoming: a staged fetch is folded into the local ref at read time",
     await appendEvents(a, [draft({ content: { text: "staged-event" } })]);
     await sync(a, "origin", "push");
 
-    // B never runs `cledger sync` — just the plain fetch the installed
+    // B never runs an explicit sync — just the plain fetch the installed
     // refspec would perform, landing the remote ref in the staging area.
     await git(["remote", "add", "origin", remote], { cwd: b.root });
     await makeCommit(b, "init b");

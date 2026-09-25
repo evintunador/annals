@@ -2,7 +2,7 @@
 /**
  * Minimal CLI for the default `annals` namespace: the two commands transport
  * needs to exist (`transport-push` for the pre-push hook, `sync` for manual
- * use). Vocabulary owners (cledger, …) ship their own CLIs for their own
+ * use). Vocabulary owners ship their own CLIs for their own
  * namespaces; this one exists so a bare `annals` install is self-contained.
  */
 import { findRepo } from "./git.js";

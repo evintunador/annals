@@ -43,7 +43,7 @@ export function redactText(
 /**
  * A set of exact secret values to scrub, tagged with the rule id they are
  * recorded under (e.g. "env-value" for opt-in env masking, "known-secret"
- * for values a prior `cledger redact` remembered). Kept distinct so the
+ * for values a prior redact workflow remembered). Kept distinct so the
  * redaction records — and therefore the audit trail — say which mechanism
  * scrubbed each span.
  */

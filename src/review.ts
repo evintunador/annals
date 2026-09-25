@@ -1,16 +1,16 @@
 /**
- * `cledger review` — the interactive counterpart to the contentless scan
+ * Interactive review — the counterpart to the contentless scan
  * report. One screen per distinct matched span (fingerprint), the match
  * highlighted inside real surrounding context, one keystroke to allow it
  * (this repo or globally), redact it everywhere it appears, or skip.
  *
- * This exists because the file-based flow (`cledger inspect` → read the
- * .txt → hand-type `cledger allow`/`cledger redact --pattern <regex>`) made
+ * This exists because the file-based flow (inspect → read the report →
+ * hand-type allow/redact commands) made
  * every finding a multi-step chore, and the redact path made the human
  * retype the secret they had just been warned about. Here the span is
  * already known, so redaction escapes it into a literal pattern itself.
  *
- * Same trust boundary as `cledger inspect`, same guards, same reasoning:
+ * Same trust boundary as an inspect command, same guards, same reasoning:
  * flagged content addresses humans only. The command refuses inside a
  * coding-agent session (the caller checks inAgentSession before invoking)
  * and additionally requires a real TTY on both ends — piped output is how

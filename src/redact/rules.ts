@@ -1,6 +1,6 @@
 /**
- * Capture-time and scan-time redaction rulesets. See docs/
- * WIP_TECHNICAL_DESIGN.md ("Privacy and integrity") for the layered design:
+ * Capture-time and scan-time redaction rulesets. See
+ * docs/architecture.md ("Privacy and integrity") for the layered design:
  * capture-tier rules run unconditionally on every draft and must be
  * near-zero-false-positive (a false positive silently rewrites the record),
  * standard/paranoid tiers are scan-time-only and may be noisier since they
@@ -119,7 +119,7 @@ const STANDARD_RULES: RedactionRule[] = [
      * annotations (`secret: string): string {`) and template interpolation
      * (`secret: ${secret.slice(i, i + 6)}`) both hit the excluded set
      * immediately and now fall below the 8-char floor instead of matching.
-     * Surfaced by dogfooding cledger on its own repo, where the old charset
+     * Surfaced by dogfooding the scanner on its own repo, where the old charset
      * flagged the redaction source files themselves.
      *
      * Note this cannot (and should not) suppress secret-*shaped* string

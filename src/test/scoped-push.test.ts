@@ -290,7 +290,7 @@ test("an already-installed hook block is upgraded in place, preserving the rest 
   try {
     await makeCommit(repo, "init");
     const hookPath = join(repo.commonDir, "hooks", "pre-push");
-    // A stale install: cledger's markers around the old </dev/null body,
+    // A stale install: annals' markers around the old </dev/null body,
     // wrapped in a user's own hook content that must survive untouched.
     const stale = [
       "#!/bin/sh",
@@ -317,8 +317,8 @@ test("an already-installed hook block is upgraded in place, preserving the rest 
 });
 
 test("a user hook that reads stdin first degrades to HEAD scope, not to a failed push", async () => {
-  // installHook appends cledger's block after any existing hook, so an
-  // existing script can legitimately drain stdin before cledger sees it.
+  // installHook appends annals' block after any existing hook, so an existing
+  // script can legitimately drain stdin before annals sees it.
   // The push must still happen, scoped to HEAD.
   const remote = await makeBareRepo();
   const repo = await makeTempRepo("cledger-hook-drain-");

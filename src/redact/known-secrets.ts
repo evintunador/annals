@@ -1,12 +1,13 @@
 /**
- * Opt-in local store of confirmed secret *values* (layer C sibling, see
- * docs/WIP_TECHNICAL_DESIGN.md "Privacy and integrity"). When
- * `{"redact": {"knownSecrets": true}}` is set, a `cledger redact --pattern`
+ * Opt-in local store of confirmed secret *values* (see
+ * docs/architecture.md "Privacy and integrity"). When
+ * `{"redact": {"knownSecrets": true}}` is set, a redact workflow
  * remembers the exact strings it scrubbed here, and capture-time redaction
  * then exact-matches them out of every future event — so a value the broad
  * sync scan caught (but the conservative capture tier missed) can never be
  * re-captured raw. That closes the capture side of the redaction feedback
- * loop; the sync-report side is closed by the masked excerpt in scan.ts.
+ * loop; the sync-report side is closed by the contentless fingerprint report
+ * in scan.ts.
  *
  * This file necessarily holds plaintext secrets. It lives under `.git/`,
  * which git never tracks or pushes (structurally, not via .gitignore), so it

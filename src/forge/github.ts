@@ -29,7 +29,7 @@ async function gh(args: string[], cwd: string): Promise<string | null> {
 }
 
 /**
- * GitHub via the user's own `gh` CLI session — cledger never touches
+ * GitHub via the user's own `gh` CLI session — annals never touches
  * credentials. `gh` resolves which GitHub repo from the cwd's origin.
  */
 export function githubDriver(repoRoot: string): ForgeDriver {

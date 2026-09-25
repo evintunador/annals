@@ -6,7 +6,7 @@ import type { ForgeDriver } from "./forge/forge.js";
  * Evidence-ranked candidates for the branches exact matching could not map
  * (a maintainer edited during the squash, conflicts were resolved by hand,
  * two candidates tied). Everything here is *suggestion only*: it runs solely
- * in the explicit `cledger re-anchor` command, is presented with its
+ * in an explicit producer-CLI re-anchor command, is presented with its
  * evidence spelled out, and is applied only when the human runs the printed
  * `--onto` command — misattribution is worse than orphaning, so nothing
  * fuzzy ever auto-applies. Evidence tiers, strongest first:

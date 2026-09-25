@@ -3,7 +3,7 @@
  *
  * Storage has always been per-commit and push has been branch-scoped since
  * 0.14.0, but `readEvents` applied reachability only when the caller asked and
- * `cledger export` never asked — so an automated consumer reading the ledger
+ * an export command never asked — so an automated consumer reading the ledger
  * got every branch's conversations, including work that was abandoned and
  * never merged. The default belongs here rather than in one CLI command,
  * because the consumers that matter (intent-recall and anything else using the
@@ -87,4 +87,3 @@ test("readEvents: other filters do not silently widen the scope", async () => {
     await cleanupRepo(repo);
   }
 });
-

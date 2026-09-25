@@ -51,7 +51,7 @@ function hookInvocation(ns: NamespaceConfig): { node: string; cli: string } | nu
 }
 
 /**
- * The block cledger owns inside `pre-push`, delimited by HOOK_MARKER so it can
+ * The block this namespace owns inside `pre-push`, delimited by HOOK_MARKER so it can
  * be recognized, upgraded, and removed without touching the rest of the file.
  *
  * The hook is fed git's pre-push stdin — one `<local ref> <local sha> <remote
@@ -100,7 +100,7 @@ function hookBlock(ns: NamespaceConfig): string {
   ].join("\n");
 }
 /**
- * Replace an already-installed cledger block with the current one.
+ * Replace an already-installed namespace block with the current one.
  *
  * Without this an existing install keeps whatever block it was created with
  * forever — `installHook` used to return "present" on any file containing the
