@@ -153,6 +153,7 @@ export async function writeStorageLines(repo: Ledger, anchor: string, lines: str
   }
   // One flat notes tree and one commit, regardless of fragment count. No user index.
   const tree = (await git(["mktree"], { cwd: repo.root, input: [...treeEntries].sort(([a], [b]) => a.localeCompare(b)).map(([key, oid]) => `100644 blob ${oid}\t${key}\n`).join("") })).trim();
+  if (old && tree === (await git(["rev-parse", `${old}^{tree}`], { cwd: repo.root })).trim()) return;
   const next = (await git(["commit-tree", tree, ...(old ? ["-p", old] : []), "-m", "annals: bounded notes snapshot"], { cwd: repo.root })).trim();
   await git(["update-ref", ref, next, old || "0".repeat(hashLength)], { cwd: repo.root });
 }

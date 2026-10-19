@@ -716,7 +716,8 @@ async function pushScopedNotes(
       // Line-level sort+unique: the same shape `cat_sort_uniq` gives the
       // merge path, so a scoped push and a full merge converge.
       const union = [...new Set([...seeded, ...local])].sort();
-      if (union.length === seeded.length) continue; // remote already had all of them
+      // Repack legacy remote notes even when their records are already present.
+      // The writer avoids a commit when the bounded tree is already identical.
       await writeStorageLines(repo, anchor, union, tmpRef);
     }
     const tmpExists = (await git(["rev-parse", "--verify", "--quiet", tmpRef], {

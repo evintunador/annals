@@ -135,3 +135,25 @@ test("corrupt fragment bytes fail digest verification without exposing data", as
     await assert.rejects(storageLines(repo, anchor), { message: "Corrupt annals storage record" });
   } finally { await cleanupRepo(repo); }
 });
+
+test("scoped sync repacks an unchanged legacy remote note and then remains a no-op", async () => {
+  const repo = await makeTempRepo();
+  const remote = await makeBareRepo();
+  try {
+    const anchor = await makeCommit(repo);
+    const lines = [serializeEvent(event({ content: { text: "EXAMPLE".repeat(700_000) } }))];
+    await git(["notes", "--ref", repo.ns.name, "add", "-F", "-", anchor], { cwd: repo.root, input: lines.join("\n") + "\n" });
+    await git(["remote", "add", "origin", remote], { cwd: repo.root });
+    await git(["push", "origin", `${notesRef(repo.ns)}:${notesRef(repo.ns)}`], { cwd: repo.root });
+    await sync(repo, "origin", "push", { skipScan: true });
+    const tip = (await git(["ls-remote", "origin", notesRef(repo.ns)], { cwd: repo.root })).trim().split(" ")[0]!.split("\t")[0]!;
+    // Only the remote's retained ancestors exceed the storage bound.
+    const currentObjects = await git(["ls-tree", "-r", tip], { cwd: remote });
+    for (const row of currentObjects.trim().split("\n")) {
+      const blob = row.split(" ")[2]!.split("\t")[0]!;
+      assert.ok(Number((await git(["cat-file", "-s", blob], { cwd: remote })).trim()) <= NOTE_BYTES);
+    }
+    await sync(repo, "origin", "push", { skipScan: true });
+    assert.equal((await git(["ls-remote", "origin", notesRef(repo.ns)], { cwd: repo.root })).trim().split(/\s+/)[0], tip);
+  } finally { await cleanupRepo(repo); await cleanupDir(remote); }
+});
