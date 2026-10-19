@@ -145,3 +145,19 @@ and precedence rules.
    the existing transport hook.
 6. Document a complete profile-add example for people using the standalone
    annals CLI.
+
+## Storage maintenance compatibility
+
+The dispatcher also exposes `<tool> records storage-audit` and
+`<tool> records storage-prepare`. Both emit only sizes, IDs, counts or ref
+coordinates; preparation creates a backup and a verified candidate without
+promoting or pushing it. Use the producer's exact namespace/profile so its
+local review and allowlist state stays in place. These commands do not replace
+the producer's human review workflow.
+
+Consumers must read through Annals APIs rather than parse raw anchor note
+bodies: new storage packs JSONL into bounded fragment notes. Upgrade all
+consumers and hook invocations before the first fragment write. Legacy notes
+remain readable, and existing event envelopes and dedup/redaction behavior
+are preserved. See [bounded notes and recovery](architecture.md#bounded-notes-and-recovery)
+and the [incident recovery procedure](oversized-notes-recovery.md).

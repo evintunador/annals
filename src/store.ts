@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { storageLines, storageAnchors, writeStorageLines, assertPushObjects } from "./note-storage.js";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -54,17 +56,10 @@ import {
 
 export { ensureMergeConfig } from "./transport.js";
 
-/**
- * Storage model: one git note per anchor commit under refs/notes/
- * the selected ledger namespace. The note body is JSONL — one canonical-JSON event
- * per line, lexicographically sorted, unique. Everything lives in the note
- * blob itself (no out-of-tree pointers), so records are reachable from the
- * ref, GC-safe, travel with `git push`/`fetch` of that one ref, and merge
- * conflict-free with the cat_sort_uniq notes strategy.
- *
- * Events are anchored to HEAD at capture time, so conversations ride the
- * commit DAG: merge a branch and its conversations become reachable from
- * the target branch with no extra machinery.
+/** Logical anchor JSONL is packed into bounded, content-addressed fragment notes.
+ * Legacy anchor notes remain readable. Every fragment is a real tree entry in
+ * this namespace's ref: ordinary Git reachability, transfer, and notes union
+ * retain all bytes. See docs/architecture.md for format and migration details.
  */
 
 function stateDir(repo: Ledger): string {
@@ -95,11 +90,7 @@ export async function captureContext(repo: Ledger): Promise<RepoContext> {
 }
 
 async function readNoteLines(repo: Ledger, anchor: string, refName = repo.ns.name): Promise<string[]> {
-  const body = await git(["notes", "--ref", refName, "show", anchor], {
-    cwd: repo.root,
-    allowFailure: true,
-  });
-  return body.split("\n").filter((l) => l.trim().length > 0);
+  return storageLines(repo, anchor, (refName.startsWith("refs/") || /^[0-9a-f]{40,64}$/.test(refName)) ? refName : `refs/notes/${refName}`);
 }
 
 /** `refName` defaults to the main ledger ref; the scan gate also reads a temp fetched ref. */
@@ -113,15 +104,7 @@ export async function readNoteEvents(
 
 /** All (anchor commit, note) pairs in the ledger ref (or `refName`, for reading a temp fetched ref). */
 export async function listAnchors(repo: Ledger, refName = repo.ns.name): Promise<string[]> {
-  const out = await git(["notes", "--ref", refName, "list"], {
-    cwd: repo.root,
-    allowFailure: true,
-  });
-  return out
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => line.split(/\s+/)[1])
-    .filter((sha): sha is string => Boolean(sha));
+  return storageAnchors(repo, (refName.startsWith("refs/") || /^[0-9a-f]{40,64}$/.test(refName)) ? refName : `refs/notes/${refName}`);
 }
 
 async function withLock<T>(repo: Ledger, fn: () => Promise<T>): Promise<T> {
@@ -229,7 +212,8 @@ export async function appendEvents(
       return appendPending(repo, events);
     }
     const pending = await drainPending(repo);
-    const existing = await readNoteLines(repo, anchor);
+    const base = (await git(["rev-parse", "--verify", "--quiet", notesRef(repo.ns)], { cwd: repo.root, allowFailure: true })).trim();
+    const existing = base ? await storageLines(repo, anchor, base) : [];
     const known = new Set(existing.map((l) => parseEventLine(l).id));
     const fresh = [...pending, ...events].filter((e) => {
       if (known.has(e.id)) return false;
@@ -240,10 +224,8 @@ export async function appendEvents(
       return { appended: [], deduped: events.length, anchor };
     }
     const lines = [...existing, ...fresh.map(serializeEvent)].sort();
-    await git(["notes", "--ref", repo.ns.name, "add", "-f", "-F", "-", anchor], {
-      cwd: repo.root,
-      input: lines.join("\n") + "\n",
-    });
+    await writeStorageLines(repo, anchor, lines, notesRef(repo.ns), base);
+    await rm(pendingPath(repo), { force: true });
     const freshIds = new Set(fresh.map((e) => e.id));
     return {
       appended: events.filter((e) => freshIds.has(e.id)),
@@ -270,7 +252,6 @@ async function drainPending(repo: Ledger): Promise<EvidenceEvent[]> {
   const path = pendingPath(repo);
   if (!existsSync(path)) return [];
   const events = (await readFile(path, "utf8")).split("\n").filter(Boolean).map(parseEventLine);
-  await rm(path, { force: true });
   return events;
 }
 
@@ -337,7 +318,7 @@ export async function readEvents(repo: Ledger, opts: ReadOptions = {}): Promise<
   }
   const events: EvidenceEvent[] = [];
   for (const anchor of anchors) {
-    events.push(...(await readNote(anchor)));
+    for (const event of await readNote(anchor)) events.push(event);
   }
   events.push(...(await readPending(repo)));
   const kinds =
@@ -675,13 +656,13 @@ export interface SyncResult {
  * push the mapping events describing them while leaving the events they
  * point at behind.
  */
-async function anchorsForRevs(repo: Ledger, revs: string[]): Promise<string[]> {
-  const anchors = await listAnchors(repo);
+async function anchorsForRevs(repo: Ledger, revs: string[], sourceRef = repo.ns.name): Promise<string[]> {
+  const anchors = await listAnchors(repo, sourceRef);
   const noteCache = new Map<string, EvidenceEvent[]>();
   const readNote = async (anchor: string): Promise<EvidenceEvent[]> => {
     let events = noteCache.get(anchor);
     if (!events) {
-      events = await readNoteEvents(repo, anchor);
+      events = await readNoteEvents(repo, anchor, sourceRef);
       noteCache.set(anchor, events);
     }
     return events;
@@ -718,32 +699,32 @@ async function pushScopedNotes(
   repo: Ledger,
   remote: string,
   anchors: string[],
+  sourceRef = repo.ns.name,
 ): Promise<void> {
-  const tmpName = `${repo.ns.name}-push-tmp`;
+  const tmpName = `${repo.ns.name}-push-tmp-${randomUUID()}`;
   const tmpRef = `refs/notes/${tmpName}`;
   await git(["update-ref", "-d", tmpRef], { cwd: repo.root, allowFailure: true });
-  // Seed from the remote. Failure here means the remote has no ledger ref
-  // yet (first push), so the temp ref simply starts empty.
-  await git(["fetch", remote, `+${notesRef(repo.ns)}:${tmpRef}`], { cwd: repo.root, allowFailure: true });
+  // Only an authenticated successful advertisement with no matching ref
+  // means first push. Network/fetch failures must never seed an empty ledger.
+  const advertised = (await git(["ls-remote", remote, notesRef(repo.ns)], { cwd: repo.root })).trim();
+  if (advertised) await git(["fetch", remote, `+${notesRef(repo.ns)}:${tmpRef}`], { cwd: repo.root });
   try {
     for (const anchor of anchors) {
-      const local = await readNoteLines(repo, anchor);
+      const local = await readNoteLines(repo, anchor, sourceRef);
       if (local.length === 0) continue;
       const seeded = await readNoteLines(repo, anchor, tmpName);
       // Line-level sort+unique: the same shape `cat_sort_uniq` gives the
       // merge path, so a scoped push and a full merge converge.
       const union = [...new Set([...seeded, ...local])].sort();
       if (union.length === seeded.length) continue; // remote already had all of them
-      await git(["notes", "--ref", tmpName, "add", "-f", "-F", "-", anchor], {
-        cwd: repo.root,
-        input: union.join("\n") + "\n",
-      });
+      await writeStorageLines(repo, anchor, union, tmpRef);
     }
     const tmpExists = (await git(["rev-parse", "--verify", "--quiet", tmpRef], {
       cwd: repo.root,
       allowFailure: true,
     })).trim();
     if (!tmpExists) return; // nothing in scope and the remote had nothing
+    await assertPushObjects(repo, tmpRef);
     await git(["push", remote, `${tmpRef}:${notesRef(repo.ns)}`], { cwd: repo.root });
   } finally {
     await git(["update-ref", "-d", tmpRef], { cwd: repo.root, allowFailure: true });
@@ -763,7 +744,7 @@ async function remoteNoteIds(repo: Ledger, remote: string): Promise<Set<string> 
   })).trim();
   if (!remoteHasRef) return null;
 
-  const tmpName = `${repo.ns.name}-scan-tmp`;
+  const tmpName = `${repo.ns.name}-scan-tmp-${randomUUID()}`;
   const tmpRef = `refs/notes/${tmpName}`;
   await git(["fetch", remote, `+${notesRef(repo.ns)}:${tmpRef}`], { cwd: repo.root, allowFailure: true });
   try {
@@ -844,6 +825,7 @@ async function runScanGate(
   config?: AnnalsConfig,
   reportFindings = false,
   invocation: "sync" | "transport" = "sync",
+  sourceRef = repo.ns.name,
 ): Promise<void> {
   const remoteIds = await remoteNoteIds(repo, remote);
 
@@ -852,8 +834,8 @@ async function runScanGate(
   // anchor, so a finding on a branch that was never going to be pushed still
   // blocked the push — which, given how often the flagged text is a
   // conversation *about* credential-shaped code, was a routine false block.
-  for (const anchor of anchors ?? (await listAnchors(repo))) {
-    localEvents.push(...(await readNoteEvents(repo, anchor)));
+  for (const anchor of anchors ?? (await listAnchors(repo, sourceRef))) {
+    for (const event of await readNoteEvents(repo, anchor, sourceRef)) localEvents.push(event);
   }
   // Pending events are unanchored, so they are not in this push at all; they
   // are still scanned because they exist only before the first commit, when
@@ -935,13 +917,16 @@ async function syncWithInvocation(
   }
   if (mode !== "fetch") {
     const config = await loadConfig(repo);
+    const source = (await git(["rev-parse", "--verify", "--quiet", notesRef(repo.ns)], { cwd: repo.root, allowFailure: true })).trim();
+    if (!source) return result;
+    // Pin the same snapshot for scope resolution, scanning, size audit and push.
     // Scoped by default, to the current branch. `scope: null` opts out and
     // pushes the whole ledger — the pre-0.14.0 behavior. An empty array means
     // "nothing in scope", which is distinct from "unscoped" and must not
     // silently widen to everything.
     const scope = opts.scope === undefined ? ["HEAD"] : opts.scope;
     const revs = scope === null ? null : Array.isArray(scope) ? scope : [scope];
-    const anchors = revs === null ? null : await anchorsForRevs(repo, revs);
+    const anchors = revs === null ? null : await anchorsForRevs(repo, revs, source);
     const scanDisabled = opts.skipScan === true || config.scan?.tier === "off";
     if (!scanDisabled) {
       const tier: "standard" | "paranoid" =
@@ -954,6 +939,7 @@ async function syncWithInvocation(
         config,
         opts.reportFindings === true,
         scanInvocation,
+        source,
       );
     }
     // The pushed child git inherits the internal guard env var, telling the
@@ -964,9 +950,10 @@ async function syncWithInvocation(
     env[guard] = "1";
     try {
       if (anchors === null) {
-        await git(["push", remote, `${notesRef(repo.ns)}:${notesRef(repo.ns)}`], { cwd: repo.root });
+        await assertPushObjects(repo, source);
+        await git(["push", remote, `${source}:${notesRef(repo.ns)}`], { cwd: repo.root });
       } else {
-        await pushScopedNotes(repo, remote, anchors);
+        await pushScopedNotes(repo, remote, anchors, source);
       }
     } finally {
       if (prior === undefined) delete env[guard];
@@ -1242,6 +1229,7 @@ export async function redactEvent(
   await assertNotYetShared(repo, (await locateEvent(repo, idPrefix)).event.id);
 
   const { located, rewritten, newRecords, secretValues } = await withLock(repo, async () => {
+    const base = (await git(["rev-parse", "--verify", "--quiet", notesRef(repo.ns)], { cwd: repo.root, allowFailure: true })).trim();
     const located = await locateEvent(repo, idPrefix);
     const original = located.event;
 
@@ -1319,10 +1307,7 @@ export async function redactEvent(
     newLines[located.index] = serializeEvent(rewritten);
     if (located.anchor !== null) {
       newLines.sort();
-      await git(["notes", "--ref", repo.ns.name, "add", "-f", "-F", "-", located.anchor], {
-        cwd: repo.root,
-        input: newLines.join("\n") + "\n",
-      });
+      await writeStorageLines(repo, located.anchor, newLines, notesRef(repo.ns), base);
     } else {
       await ensureStateDir(repo);
       await writeFile(pendingPath(repo), newLines.join("\n") + "\n");

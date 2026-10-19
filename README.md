@@ -5,8 +5,9 @@ write, synced through git notes. annals is the storage layer extracted from
 [conversation-ledger](https://github.com/evintunador/conversation-ledger)
 (cledger), which now sits on top of it as one vocabulary among several.
 
-A record ("event") is a JSON object stored one-per-line in a git note attached
-to the commit that was `HEAD` when it happened. Because storage is git notes
+A record ("event") is a canonical JSON object logically anchored to the
+commit that was `HEAD` when it happened. Records are packed into bounded
+fragment notes within the namespace's ref. Because storage is git notes
 under a dedicated ref, records travel with `git push`/`git fetch` (a pre-push
 hook and a fetch refspec are installed on first append), survive clones, and
 scope naturally: "records reachable from this branch" is a ref walk.
@@ -92,6 +93,8 @@ annals redact EVENT_ID (--pattern REGEX|--all)
 annals allow FINGERPRINT... [--global]
 annals reanchor [--target REV] [--apply]
 annals transport-push [remote] [--report]
+annals storage-audit
+annals storage-prepare
 ```
 
 The equivalent `annals records review`, `annals records sync`, and other
@@ -272,3 +275,22 @@ identification triple matches annals' `(producer.tool, kind,
 producer.version)`. Dolt's git-remote support solves an overlapping problem
 with a versioned SQL database; it lacks commit anchoring, which is the
 mechanism everything here hangs off.
+
+`storage-audit` reports only object IDs and byte sizes for reachable blobs
+above 100 MiB, including historical snapshots. `storage-prepare` backs up the
+active ref and creates an independently rooted, verified migration candidate;
+it prints ref names, tips, anchor and serialized-record counts. Neither command
+prints event content or replaces the active ref. The library exports
+`NOTE_BYTES`, `PUSH_BLOB_BYTES`, `auditObjects()` and
+`prepareStorageMigration()` for the same maintenance workflow.
+
+New physical note blobs are bounded by 4 MiB, including exceptionally large
+single events; ordinary payload fragments contain at most 1 MiB before base64
+encoding. Old JSONL notes remain readable. Upgrade every writer and reader
+before using the new format: raw `git notes show COMMIT` is no longer the
+logical record reader. Use `readNoteEvents()` or the owning producer instead.
+See [storage format and recovery](docs/architecture.md#bounded-notes-and-recovery)
+for reachability, merge, migration, and remaining limits, and the
+[incident recovery procedure](docs/oversized-notes-recovery.md) for the affected
+conversation-ledger repository. Existing per-event warning/refusal settings
+remain separate from physical storage bounds.

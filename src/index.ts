@@ -153,3 +153,5 @@ export { suggestMappings } from "./reanchor-suggest.js";
 export type { BranchSuggestions, Suggestion } from "./reanchor-suggest.js";
 export { forgeForRepo } from "./forge/forge.js";
 export type { ForgeDriver, ForgePullRequest } from "./forge/forge.js";
+
+export { NOTE_BYTES, PUSH_BLOB_BYTES, auditObjects, prepareStorageMigration } from "./note-storage.js";
