@@ -72,7 +72,7 @@ test("appendEvents: appending identical drafts again dedupes, no growth", async 
   }
 });
 
-test("appendEvents: note on HEAD is sorted, unique, one-canonical-event-per-line JSONL", async () => {
+test("appendEvents: logical note is sorted, unique, one-canonical-event-per-line JSONL", async () => {
   const repo = await makeTempRepo();
   try {
     const head = await makeCommit(repo, "init");
@@ -81,7 +81,7 @@ test("appendEvents: note on HEAD is sorted, unique, one-canonical-event-per-line
       draft({ content: { text: "a" } }),
       draft({ content: { text: "c" } }),
     ]);
-    const body = await git(["notes", "--ref", "annals", "show", "HEAD"], { cwd: repo.root });
+    const body = (await readNoteEvents(repo, head)).map(e => JSON.stringify(e)).join("\n");
     const lines = body.split("\n").filter((l) => l.trim().length > 0);
     assert.strictEqual(lines.length, 3);
 
@@ -94,10 +94,7 @@ test("appendEvents: note on HEAD is sorted, unique, one-canonical-event-per-line
       assert.match(parsed.id, /^ev2-/);
     }
 
-    // HEAD (a ref) and its literal SHA must show the same note body.
-    const byHead = await git(["notes", "--ref", "annals", "show", "HEAD"], { cwd: repo.root });
-    const bySha = await git(["notes", "--ref", "annals", "show", head], { cwd: repo.root });
-    assert.strictEqual(byHead, bySha);
+    assert.deepStrictEqual(new Set((await readNoteEvents(repo, head)).map(e => e.id)), new Set((await readEvents(repo)).map(e => e.id)));
   } finally {
     await cleanupRepo(repo);
   }

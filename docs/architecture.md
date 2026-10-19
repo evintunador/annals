@@ -31,14 +31,16 @@ corruption but remains a narrow layering debt, not an extension point.
 3. Walk `content` and `raw.data` with capture-tier redaction rules.
 4. Finalize and validate each event, including its deterministic `ev2-` id.
 5. Warn or refuse according to the configured event-size limits.
-6. Acquire the namespace's local writer lock and append canonical JSONL to the
-   note on the selected anchor commit.
+6. Acquire the namespace's local writer lock and pack the anchor's canonical
+   JSONL into bounded fragment notes. Publish one notes tree with a
+   compare-and-swap ref update.
 
 When a repository has no commit yet, events go into a private pending queue
 under the common git directory. The next append after the first commit drains
-that queue into the new commit's note.
+that queue into the new commit's logical note. The pending file is removed
+only after the notes write succeeds.
 
-The note body is sorted canonical JSONL. Concurrent writers are serialized by
+The logical note is sorted canonical JSONL. Concurrent writers are serialized by
 the local lock, and existing ids are removed before writing, making repeated
 capture idempotent.
 
@@ -137,3 +139,96 @@ therefore contain facts, pointers, digests, and spans rather than large
 artifacts. The default warning threshold is 5 MB. A producer may configure a
 hard maximum when refusing a capture is safer than replication, but capture
 paths that must not lose records should keep the default warning-only policy.
+
+## Bounded notes and recovery
+
+Legacy storage accumulates every record at an anchor into one JSONL blob.
+Both the current note and all preceding snapshots are reachable through the
+notes ref's own commit parents. Git compression does not reduce a blob's
+uncompressed size for a hosting limit. Replacing a giant current note therefore
+does not make its oversized ancestors safe to push.
+
+New writes store content-addressed physical notes, each at most 4 MiB. Sorted
+complete lines are packed into batches of at most 1 MiB (except a single larger
+line); batches are split at 1 MiB byte boundaries. Each fragment is a JSON
+storage envelope with `annals_storage: 1`, `anchor`, SHA-256 `digest` of the
+whole batch, zero-based `part`, total `count`, and base64 `data`. Unicode byte
+boundaries need not coincide with fragment boundaries: bytes are reassembled
+before UTF-8 decoding. No event field is changed. This format does not examine
+producer-owned content or metadata.
+
+The physical note key hashes the domain `annals-storage-v1`, anchor, batch
+digest, and part number, separated by colons, with the repository's Git object
+hash algorithm. Physical keys are storage addresses, never logical anchors.
+All fragment blobs are entries in the notes commit's tree, so ref fetch/push,
+GC reachability and native `cat_sort_uniq` merges retain them. There are no
+external pointers. New writes construct a flat tree without touching the user
+index, reuse unchanged blob IDs, and publish one commit with compare-and-swap.
+Existing fanout trees are read recursively. Unsupported non-note tree entries
+cause refusal rather than silently dropping objects.
+
+Readers enumerate logical anchors from fragment envelopes and legacy note
+keys. They require complete, consistent fragment sets and matching digests,
+then union exact JSONL lines. Different provenance variants sharing an event
+ID survive storage and migration. Existing logical ID deduplication, redaction
+preference, ordering, links and re-anchor traversal remain in the store layer.
+A native merge can retain duplicate batches with overlapping records; exact
+line union makes their reads converge. Missing or corrupt fragments fail
+closed. As with legacy notes, removing an entire record or batch with external
+Git commands is a deletion; fragments cannot detect that deletion themselves.
+
+Scoped push pins one local snapshot for reachability resolution, secret
+scanning and transfer. It unions only selected logical anchors into a unique
+temporary ref seeded from the advertised remote tip; a failed fetch never
+means an empty remote. The temporary ref descends from the remote, not the
+local notes history. The preflight enumerates every reachable blob in the
+actual outgoing snapshot, including commit ancestors, and blocks blobs above
+100 MiB before invoking push. Unscoped push audits and pushes the same pinned
+local tip. The check conservatively includes blobs already on the remote.
+Transport hook failures continue to allow code pushes under the existing
+policy; the ledger remains local.
+
+`prepareStorageMigration()` / `storage-prepare` pins and backs up the live
+notes tip under `refs/annals-backups/<namespace>/<uuid>`, then builds a candidate
+under `refs/notes/<namespace>-migration-<uuid>` with an independent root. It
+preserves every current anchor and distinct serialized record, verifies exact
+line equality after reassembly, and audits the resulting object graph. Old
+snapshots remain reachable from the backup; they are deliberately excluded
+from the candidate's ancestry. Historical versions are retained locally by
+the backup rather than resurrected into the current record set. A changed
+source causes refusal; the source, backup and candidate are retained for
+inspection. The routine never replaces the active ref or pushes anything.
+
+Promotion requires an operator-approved compare-and-swap after capture and
+sync writers are stopped. Preserve and reconcile pending records, allowlists,
+known-secret state and producer cursors; migration does not modify them.
+Back up all affected incoming/staging refs too. Reconcile their current
+records using the new reader before removing stale staging refs: native merge
+of old history after promotion can restore oversized ancestors. Other clones
+must upgrade and follow the same recovery rules. Never push backup refs,
+`--mirror`, or `--all` refs as part of this recovery.
+
+If only local history is oversized, a normal scoped push can publish bounded
+current records on top of the clean remote tip without force. A contaminated
+remote history requires a separate reviewed remote-root migration, explicit
+approval for history rewriting, a lease on the observed remote tip, and
+coordinated recovery in every clone. Preparation does not authorize that step.
+See the [incident recovery procedure](oversized-notes-recovery.md).
+
+LFS is not automatically applied to blobs written with Git plumbing or notes.
+Adopting it would require explicit object upload, download, authentication,
+missing-object handling and independent retention guarantees. A pointer in a
+note would no longer make the record bytes reachable and transferable through
+that notes ref alone. Bounded in-ref fragments preserve the present contract.
+
+Limits remain: the total ledger and notes history are unbounded, base64 adds
+roughly one third to fragment payload sizes, and repacking can retain old
+bounded blobs in history. Reads and migrations materialize records in memory;
+they are not streaming. The existing Git subprocess reader has a 512 MiB
+per-command output limit, so larger legacy blobs require separate streaming
+recovery tooling. This implementation addresses the observed ~301 MiB note,
+not arbitrary-size legacy objects. Hosts may impose repository, push, object
+count or rate limits beyond the per-blob bound. Native merges involving two unmigrated legacy notes can still produce an
+oversized legacy blob; scoped rewriting or a prepared migration is needed,
+and the preflight prevents a doomed unscoped push. Older Annals readers and
+writers cannot safely operate on fragment notes; upgrade consumers together.

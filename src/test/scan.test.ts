@@ -1,3 +1,4 @@
+import { storageLines, writeStorageLines } from "../note-storage.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { git } from "../git.js";
@@ -433,12 +434,9 @@ test("sync gate: events the remote already has are not rescanned on a later sync
     // would trip the gate if it were rescanned) without going through the
     // normal capture/redact path.
     const anchor = (await git(["rev-parse", "HEAD"], { cwd: repo.root })).trim();
-    const body = await git(["notes", "--ref", "annals", "show", anchor], { cwd: repo.root });
+    const body = (await storageLines(repo, anchor)).join("\n");
     const tampered = body.replace("hello world", "password=supersecret123");
-    await git(["notes", "--ref", "annals", "add", "-f", "-F", "-", anchor], {
-      cwd: repo.root,
-      input: tampered,
-    });
+    await writeStorageLines(repo, anchor, tampered.split("\n"));
 
     // Add one genuinely new, clean event alongside it.
     await appendEvents(repo, [draft({ content: { text: "clean-followup" } })]);

@@ -1,3 +1,4 @@
+import { storageLines } from "../note-storage.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { git } from "../git.js";
@@ -66,9 +67,7 @@ test("appendEvents anchors to an explicit anchor when given, not HEAD", async ()
     await makeCommit(repo, "second");
     const result = await appendEvents(repo, [draft()], { anchor: first });
     assert.equal(result.anchor, first);
-    const note = await git(["notes", "--ref", "annals", "show", first], {
-      cwd: repo.root,
-    });
+    const note = (await storageLines(repo, first)).join("\n");
     assert.ok(note.includes('"hello"'));
   } finally {
     await cleanupRepo(repo);

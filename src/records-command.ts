@@ -1,3 +1,4 @@
+import { auditObjects, prepareStorageMigration } from "./note-storage.js";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import type { Ledger } from "./ledger.js";
@@ -156,6 +157,7 @@ export function recordsCommandUsage(commandName: string): string {
     `usage: ${commandName} <command> [options]`,
     "",
     "commands:",
+    "  storage-audit | storage-prepare",
     "  sync [remote] [--fetch-only|--push-only] [--no-scan] [--paranoid] [--all] [--report]",
     "  review [--tier standard|paranoid] [--context N]",
     "  inspect --output FILE [--tier standard|paranoid] [--context N] [--reveal]",
@@ -177,6 +179,13 @@ async function execute(options: RecordsCommandOptions): Promise<number> {
     return 0;
   }
   const parsed = parseArgs(rest);
+
+  if (command === "storage-audit" || command === "storage-prepare") {
+    if (options.argv.length !== 1) badUsage(`${command} accepts no arguments`);
+    const result = command === "storage-audit" ? await auditObjects(ledger) : await prepareStorageMigration(ledger);
+    stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return 0;
+  }
 
   if (command === "sync") {
     assertFlags(parsed, ["all", "fetch-only", "no-scan", "paranoid", "push-only", "report"]);
